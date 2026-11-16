@@ -3,15 +3,23 @@ import detectTelegramLaunch from './detectTelegramLaunch.js'
 
 /**
  * Detects the launch environment before Vue Router is created/mounted.
- * Telegram and MAX use distinct launch parameter names in the URL fragment.
- * The result is only used to decide which SDK (if any) should be loaded.
+ *
+ * A conflicting set of MAX and Telegram launch markers is treated as ordinary
+ * Web: loading either SDK in an ambiguous context is less safe than loading none.
  */
 export default function detectPlatform() {
-  if (detectTelegramLaunch()) {
+  const isMax = detectMaxLaunch()
+  const isTelegram = detectTelegramLaunch()
+
+  if (isMax && isTelegram) {
+    return 'web'
+  }
+
+  if (isTelegram) {
     return 'telegram'
   }
 
-  if (detectMaxLaunch()) {
+  if (isMax) {
     return 'max'
   }
 

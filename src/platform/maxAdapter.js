@@ -1,9 +1,12 @@
 import downloadBlob from './downloadBlob.js'
+import createWebAdapter from './webAdapter.js'
 import {
   requireHttpsUrl,
   openInBrowser,
   createBackButton,
-  createClosingConfirmation
+  createClosingConfirmation,
+  normalizeDownloadResult,
+  normalizeShareResult
 } from './adapterUtils.js'
 
 export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) {
@@ -13,11 +16,15 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
 
   const backButton = createBackButton(webApp.BackButton)
   const closingConfirmation = createClosingConfirmation(webApp)
+  const webFallback = createWebAdapter({ downloadOptions })
 
   const hasNativeDownload = typeof webApp.downloadFile === 'function'
   const hasExternalLinks = typeof webApp.openLink === 'function'
   const hasPlatformLinks = typeof webApp.openMaxLink === 'function'
   const hasShareUrl = typeof webApp.shareMaxContent === 'function'
+
+  const clientPlatform = webApp.platform || null
+  const clientVersion = webApp.version || null
 
   return {
     bridgeType: 'max',
@@ -25,9 +32,12 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
     bridgeError: null,
 
     runtime: {
-      platform: webApp.platform || null,
-      version: webApp.version || null,
-      deviceName: webApp.deviceName || null
+      clientPlatform,
+      clientVersion,
+      deviceName: webApp.deviceName || null,
+      // Backward-compatible aliases. Prefer clientPlatform/clientVersion.
+      platform: clientPlatform,
+      version: clientVersion
     },
 
     capabilities: {
@@ -36,7 +46,8 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
       nativeExternalLinks: hasExternalLinks,
       nativePlatformLinks: hasPlatformLinks,
       closingConfirmation: closingConfirmation.supported,
-      shareUrl: hasShareUrl,
+      // Effective capability: the Web Share/clipboard fallback is also valid.
+      shareUrl: hasShareUrl || webFallback.capabilities.shareUrl,
       sharePreparedMessage: hasShareUrl
     },
 
@@ -47,9 +58,10 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
         return Promise.reject(new TypeError('A file name is required'))
       }
 
-      // Call directly from the user's click handler: MAX checks for a user gesture.
+      // Invoke the native method synchronously to preserve the user gesture.
       if (hasNativeDownload) {
-        return webApp.downloadFile(validUrl, fileName)
+        const result = webApp.downloadFile(validUrl, fileName)
+        return Promise.resolve(result).then(normalizeDownloadResult)
       }
 
       return downloadBlob(validUrl, fileName, {
@@ -62,7 +74,8 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
       const validUrl = requireHttpsUrl(url, 'openExternalLink')
 
       if (hasExternalLinks) {
-        return webApp.openLink(validUrl)
+        webApp.openLink(validUrl)
+        return { status: 'requested' }
       }
 
       return openInBrowser(validUrl)
@@ -76,7 +89,8 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
       const validUrl = requireHttpsUrl(url, 'openPlatformLink')
 
       if (hasPlatformLinks) {
-        return webApp.openMaxLink(validUrl)
+        webApp.openMaxLink(validUrl)
+        return { status: 'requested' }
       }
 
       return openInBrowser(validUrl)
@@ -86,13 +100,15 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
       const validUrl = requireHttpsUrl(url, 'shareUrl')
 
       if (!hasShareUrl) {
-        return Promise.reject(new Error('MAX shareMaxContent is unavailable'))
+        return webFallback.shareUrl(validUrl, text)
       }
 
-      return webApp.shareMaxContent({
+      // Invoke synchronously; the SDK owns its native UI lifecycle.
+      const result = webApp.shareMaxContent({
         link: validUrl,
         ...(text ? { text: String(text) } : {})
       })
+      return Promise.resolve(result).then(normalizeShareResult)
     },
 
     /**
@@ -112,7 +128,8 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
         return Promise.reject(new Error('MAX shareMaxContent is unavailable'))
       }
 
-      return webApp.shareMaxContent({ mid: messageId, chatType })
+      const result = webApp.shareMaxContent({ mid: messageId, chatType })
+      return Promise.resolve(result).then(normalizeShareResult)
     },
 
     backButton,

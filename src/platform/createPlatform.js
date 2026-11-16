@@ -1,18 +1,17 @@
 import createMaxAdapter from './maxAdapter.js'
 import createWebAdapter from './webAdapter.js'
-import createMaxFallbackAdapter from './maxFallbackAdapter.js'
+import createFallbackAdapter from './createFallbackAdapter.js'
 import createTelegramAdapter from './telegramAdapter.js'
-import createTelegramFallbackAdapter from './telegramFallbackAdapter.js'
 
 /**
- * Selects one platform adapter before Vue is mounted.
+ * Selects exactly one adapter before Vue is mounted.
  *
- * bridgeType identifies the host SDK, not the physical device:
- * - null: regular browser
+ * bridgeType identifies the host, not the physical device:
+ * - null / 'web': regular browser
  * - 'max': MAX WebApp bridge
  * - 'telegram': Telegram WebApp bridge
  *
- * A missing bridge for a recognized host selects that host's fallback.
+ * A recognized host with a missing bridge receives a host-specific fallback.
  */
 export default function createPlatform({
   bridgeType = null,
@@ -24,16 +23,16 @@ export default function createPlatform({
     return createWebAdapter({ downloadOptions })
   }
 
-  if (bridgeType === 'max') {
-    return bridge
-      ? createMaxAdapter(bridge, { downloadOptions })
-      : createMaxFallbackAdapter(error, { downloadOptions })
+  if (bridgeType === 'max' && bridge) {
+    return createMaxAdapter(bridge, { downloadOptions })
   }
 
-  if (bridgeType === 'telegram') {
-    return bridge
-      ? createTelegramAdapter(bridge, { downloadOptions })
-      : createTelegramFallbackAdapter(error, { downloadOptions })
+  if (bridgeType === 'telegram' && bridge) {
+    return createTelegramAdapter(bridge, { downloadOptions })
+  }
+
+  if (bridgeType === 'max' || bridgeType === 'telegram') {
+    return createFallbackAdapter(bridgeType, error, { downloadOptions })
   }
 
   throw new TypeError(`Unsupported bridgeType: ${bridgeType}`)

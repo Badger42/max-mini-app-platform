@@ -1,26 +1,8 @@
-import createWebAdapter from './webAdapter.js'
+import createFallbackAdapter from './createFallbackAdapter.js'
 
 /**
- * MAX launch parameters were detected, but the MAX Bridge is unavailable.
- * Preserve browser functionality and expose the selected host through bridgeType.
+ * Backward-compatible MAX fallback adapter factory.
  */
 export default function createMaxFallbackAdapter(error, options = {}) {
-  const web = createWebAdapter(options)
-
-  return {
-    ...web,
-    bridgeType: 'max',
-    bridgeAvailable: false,
-    bridgeError: error || new Error('MAX Bridge is unavailable'),
-
-    capabilities: {
-      ...web.capabilities,
-      nativeDownload: false,
-      backButton: false,
-      nativeExternalLinks: false,
-      nativePlatformLinks: false,
-      closingConfirmation: false,
-      sharePreparedMessage: false
-    }
-  }
+  return createFallbackAdapter('max', error, options)
 }

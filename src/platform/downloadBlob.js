@@ -1,3 +1,5 @@
+import { requireHttpsUrl } from './adapterUtils.js'
+
 /**
  * Browser fallback for downloading a file.
  *
@@ -10,15 +12,26 @@ export default async function downloadBlob(
   fileName,
   { credentials = 'same-origin', revokeDelayMs = 30000 } = {}
 ) {
-  if (!url || typeof url !== 'string') {
-    throw new TypeError('A download URL is required')
-  }
+  const validUrl = requireHttpsUrl(url, 'downloadFile')
 
   if (!fileName || typeof fileName !== 'string' || !fileName.trim()) {
     throw new TypeError('A file name is required')
   }
 
-  const response = await fetch(url, { credentials })
+  if (!Number.isFinite(revokeDelayMs) || revokeDelayMs < 0) {
+    throw new TypeError('revokeDelayMs must be a non-negative finite number')
+  }
+
+  if (typeof fetch !== 'function') {
+    throw new Error('Fetch API is not available in this runtime')
+  }
+
+  if (typeof document === 'undefined' || !document.body ||
+      typeof URL.createObjectURL !== 'function') {
+    throw new Error('Blob downloads are not available in this runtime')
+  }
+
+  const response = await fetch(validUrl, { credentials })
 
   if (!response.ok) {
     throw new Error(`Download failed: HTTP ${response.status}`)
@@ -29,7 +42,6 @@ export default async function downloadBlob(
   }
 
   const blob = await response.blob()
-
   const objectUrl = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = objectUrl
@@ -41,7 +53,10 @@ export default async function downloadBlob(
   link.remove()
 
   // Do not revoke synchronously: some browsers need time to start the download.
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), revokeDelayMs)
+  const schedule = typeof window !== 'undefined' && window.setTimeout
+    ? window.setTimeout.bind(window)
+    : setTimeout
+  schedule(() => URL.revokeObjectURL(objectUrl), revokeDelayMs)
 
   return { status: 'requested' }
 }

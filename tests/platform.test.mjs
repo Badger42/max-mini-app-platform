@@ -227,7 +227,7 @@ test('Telegram downloadFile uses Telegram parameter names and normalizes callbac
     url: 'https://files.example.com/a.pdf',
     file_name: 'a.pdf'
   })
-  assert.deepEqual(result, { status: 'accepted' })
+  assert.deepEqual(result, { status: 'requested', platformStatus: 'accepted' })
 })
 
 test('Telegram Bot API 8.0 media methods are disabled on older clients', async () => {

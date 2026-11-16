@@ -1,9 +1,13 @@
 /**
- * Shared helpers used by the platform adapters.
- * Keep platform-specific API method names inside the respective adapters.
+ * Platform-neutral helpers shared by all adapters.
+ * Platform-specific SDK method names must remain inside their adapters.
  */
 
-export function requireHttpsUrl(value, methodName) {
+export function requireHttpsUrl(value, methodName = 'operation') {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new TypeError(`${methodName}: a URL is required`)
+  }
+
   let url
 
   try {
@@ -16,20 +20,34 @@ export function requireHttpsUrl(value, methodName) {
     throw new TypeError(`${methodName}: only HTTPS URLs are supported`)
   }
 
+  if (url.username || url.password) {
+    throw new TypeError(`${methodName}: URLs containing credentials are not supported`)
+  }
+
   return url.href
 }
 
+/**
+ * `window.open()` returns null with noopener in several browsers, even when
+ * the new tab was requested successfully. Do not interpret that return value
+ * as popup-blocking feedback.
+ */
 export function openInBrowser(url) {
   if (typeof window === 'undefined' || typeof window.open !== 'function') {
-    return false
+    return { status: 'unavailable' }
   }
 
-  return Boolean(window.open(url, '_blank', 'noopener,noreferrer'))
+  window.open(url, '_blank', 'noopener,noreferrer')
+  return { status: 'requested' }
+}
+
+export function canOpenInBrowser() {
+  return typeof window !== 'undefined' && typeof window.open === 'function'
 }
 
 /**
  * Normalizes the structurally identical BackButton APIs exposed by MAX and
- * Telegram. The caller supplies the native BackButton object.
+ * Telegram. The returned unsubscribe function is idempotent.
  */
 export function createBackButton(nativeBackButton) {
   const supported = Boolean(
@@ -97,6 +115,38 @@ export function createClosingConfirmation(bridge) {
       }
     }
   }
+}
+
+/**
+ * MAX reports `downloading`; Telegram reports whether the user accepted.
+ * Both mean that a download was requested, not that bytes reached the device.
+ */
+export function normalizeDownloadResult(result) {
+  const platformStatus = result && typeof result.status === 'string'
+    ? result.status
+    : null
+
+  if (platformStatus === 'cancelled') {
+    return { status: 'cancelled', platformStatus }
+  }
+
+  return {
+    status: 'requested',
+    ...(platformStatus ? { platformStatus } : {})
+  }
+}
+
+export function normalizeShareResult(result) {
+  if (result && typeof result === 'object') {
+    const status = result.status
+    if (['shared', 'cancelled', 'opened', 'copied', 'requested'].includes(status)) {
+      return result
+    }
+
+    return { status: 'requested', platformResult: result }
+  }
+
+  return { status: 'requested' }
 }
 
 export function unavailable(methodName) {

@@ -1,26 +1,8 @@
-import createWebAdapter from './webAdapter.js'
+import createFallbackAdapter from './createFallbackAdapter.js'
 
 /**
- * Telegram launch parameters were detected, but the Telegram SDK is unavailable.
- * Preserve browser functionality and expose the selected host through bridgeType.
+ * Backward-compatible Telegram fallback adapter factory.
  */
 export default function createTelegramFallbackAdapter(error, options = {}) {
-  const web = createWebAdapter(options)
-
-  return {
-    ...web,
-    bridgeType: 'telegram',
-    bridgeAvailable: false,
-    bridgeError: error || new Error('Telegram SDK is unavailable'),
-
-    capabilities: {
-      ...web.capabilities,
-      nativeDownload: false,
-      backButton: false,
-      nativeExternalLinks: false,
-      nativePlatformLinks: false,
-      closingConfirmation: false,
-      sharePreparedMessage: false
-    }
-  }
+  return createFallbackAdapter('telegram', error, options)
 }

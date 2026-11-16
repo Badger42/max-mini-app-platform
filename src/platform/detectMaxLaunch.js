@@ -1,39 +1,44 @@
 const MAX_PLATFORMS = new Set(['ios', 'android', 'desktop', 'web'])
+const MAX_LAUNCH_KEYS = ['WebAppData', 'WebAppPlatform', 'WebAppVersion']
 
 /**
- * Read MAX launch parameters from the URL fragment.
+ * Parse MAX launch parameters from the URL fragment.
  *
- * MAX documents the fragment parameters WebAppData, WebAppPlatform and
- * WebAppVersion. This is environment detection only; it is NOT authentication
- * and must never be used as proof of a user's identity.
+ * Duplicate protocol parameters are rejected rather than silently trusting the
+ * first value. This is environment detection only, never authentication.
  */
 export function parseMaxLaunchHash(hash) {
   const fragment = String(hash || '').replace(/^#/, '')
   const params = new URLSearchParams(fragment)
-  const platform = params.get('WebAppPlatform')
-  const version = params.get('WebAppVersion')
-  const hasWebAppData = params.has('WebAppData')
+  const hasDuplicates = MAX_LAUNCH_KEYS.some(key => params.getAll(key).length > 1)
 
-  const isMaxLaunch = hasWebAppData || (
-    MAX_PLATFORMS.has(platform) && Boolean(version)
+  const getUniqueValue = key => {
+    const values = params.getAll(key)
+    return values.length === 1 ? values[0] : null
+  }
+
+  const platformValue = getUniqueValue('WebAppPlatform')
+  const version = getUniqueValue('WebAppVersion')
+  const webAppData = getUniqueValue('WebAppData')
+  const platform = MAX_PLATFORMS.has(platformValue) ? platformValue : null
+
+  const isMaxLaunch = !hasDuplicates && Boolean(
+    webAppData || (platform && version)
   )
 
   return {
     isMaxLaunch,
-    platform: MAX_PLATFORMS.has(platform) ? platform : null,
-    version: version || null
+    platform,
+    version: version || null,
+    invalid: hasDuplicates
   }
 }
 
 export default function detectMaxLaunch() {
-  // Useful when the host has already injected the Bridge for some reason.
-  if (typeof window !== 'undefined' && window.WebApp) {
-    return true
-  }
-
   if (typeof window === 'undefined' || !window.location) {
     return false
   }
 
+  // SDK globals are not proof of host context: another script may have loaded it.
   return parseMaxLaunchHash(window.location.hash).isMaxLaunch
 }

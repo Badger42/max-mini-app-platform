@@ -1,13 +1,24 @@
 # Tests
 
-The scaffold has no package manifest or test-runner dependency. The platform
-smoke tests use Node's built-in test runner and can be run with Node 22:
+The repository has no runtime or third-party test dependencies. Node's built-in
+test runner is used; Node.js 20 or newer is required.
+
+Run the complete suite:
 
 ```bash
-node --experimental-default-type=module --test tests/*.test.mjs
+npm test
 ```
 
-The tests cover Telegram launch detection, platform selection, the Telegram
-fallback adapter, native file-download argument mapping, prepared-message
-sharing, and URL sharing. They do not replace testing inside the real Telegram
-clients (Android, iOS, Desktop and Telegram Web).
+Run only the platform tests:
+
+```bash
+npm run test:platform
+```
+
+The tests cover runtime detection, duplicate launch parameters, adapter
+selection, common adapter contracts, URL validation, result normalization,
+BackButton lifecycle/concurrency, Bridge loading, timeout, retry and late-load
+behavior.
+
+Automated tests do not replace integration testing inside real MAX and
+Telegram clients (Android, iOS, Desktop and Web).

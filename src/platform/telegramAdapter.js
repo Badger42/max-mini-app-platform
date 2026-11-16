@@ -2,8 +2,10 @@ import downloadBlob from './downloadBlob.js'
 import {
   requireHttpsUrl,
   openInBrowser,
+  canOpenInBrowser,
   createBackButton,
-  createClosingConfirmation
+  createClosingConfirmation,
+  normalizeDownloadResult
 } from './adapterUtils.js'
 
 function unavailable(methodName) {
@@ -14,19 +16,23 @@ function unavailable(methodName) {
 
 function supportsVersion(webApp, requiredVersion) {
   if (typeof webApp.isVersionAtLeast === 'function') {
-    return webApp.isVersionAtLeast(requiredVersion)
+    try {
+      return Boolean(webApp.isVersionAtLeast(requiredVersion))
+    } catch (_) {
+      return false
+    }
   }
 
-  const current = String(webApp.version || '').split('.').map(Number)
-  const required = requiredVersion.split('.').map(Number)
+  const current = String(webApp.version || '').split('.')
+  const required = requiredVersion.split('.')
 
-  if (!current.length || current.some(Number.isNaN)) {
+  if (!current.length || current.some(part => !/^\d+$/.test(part))) {
     return false
   }
 
   for (let index = 0; index < required.length; index += 1) {
-    const currentPart = current[index] || 0
-    const requiredPart = required[index] || 0
+    const currentPart = Number(current[index] || 0)
+    const requiredPart = Number(required[index] || 0)
 
     if (currentPart > requiredPart) return true
     if (currentPart < requiredPart) return false
@@ -49,15 +55,21 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
   const hasExternalLinks = typeof webApp.openLink === 'function'
   const hasPlatformLinks = typeof webApp.openTelegramLink === 'function'
 
+  const clientPlatform = webApp.platform || null
+  const clientVersion = webApp.version || null
+
   return {
     bridgeType: 'telegram',
     bridgeAvailable: true,
     bridgeError: null,
 
     runtime: {
-      platform: webApp.platform || null,
-      version: webApp.version || null,
-      deviceName: null
+      clientPlatform,
+      clientVersion,
+      deviceName: null,
+      // Backward-compatible aliases. Prefer clientPlatform/clientVersion.
+      platform: clientPlatform,
+      version: clientVersion
     },
 
     capabilities: {
@@ -66,7 +78,8 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
       nativeExternalLinks: hasExternalLinks,
       nativePlatformLinks: hasPlatformLinks,
       closingConfirmation: closingConfirmation.supported,
-      shareUrl: hasPlatformLinks,
+      // Telegram can open its share composer via the SDK or a browser URL.
+      shareUrl: hasPlatformLinks || canOpenInBrowser(),
       sharePreparedMessage: hasShareMessage
     },
 
@@ -83,11 +96,15 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
       }
 
       if (hasNativeDownload) {
+        // Constructing this Promise calls downloadFile synchronously, preserving
+        // the user gesture required by Telegram clients.
         return new Promise((resolve, reject) => {
           try {
             webApp.downloadFile(
               { url: validUrl, file_name: fileName },
-              accepted => resolve({ status: accepted ? 'accepted' : 'cancelled' })
+              accepted => resolve(normalizeDownloadResult({
+                status: accepted ? 'accepted' : 'cancelled'
+              }))
             )
           } catch (error) {
             reject(error)
@@ -105,7 +122,8 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
       const validUrl = requireHttpsUrl(url, 'openExternalLink')
 
       if (hasExternalLinks) {
-        return webApp.openLink(validUrl)
+        webApp.openLink(validUrl)
+        return { status: 'requested' }
       }
 
       return openInBrowser(validUrl)
@@ -119,7 +137,8 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
       const validUrl = requireHttpsUrl(url, 'openPlatformLink')
 
       if (hasPlatformLinks) {
-        return webApp.openTelegramLink(validUrl)
+        webApp.openTelegramLink(validUrl)
+        return { status: 'requested' }
       }
 
       return openInBrowser(validUrl)
@@ -127,7 +146,8 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
 
     /**
      * Opens Telegram's official share URL composer.
-     * "opened" means the composer was invoked, not that content was sent.
+     * `opened` means the Telegram SDK method was invoked. Browser fallback
+     * reports `requested`, because window.open cannot confirm popup success.
      */
     shareUrl(url, text = '') {
       const validUrl = requireHttpsUrl(url, 'shareUrl')
@@ -140,11 +160,10 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
 
       if (hasPlatformLinks) {
         webApp.openTelegramLink(shareLink.toString())
-      } else {
-        openInBrowser(shareLink.toString())
+        return Promise.resolve({ status: 'opened' })
       }
 
-      return Promise.resolve({ status: 'opened' })
+      return Promise.resolve(openInBrowser(shareLink.toString()))
     },
 
     /**
