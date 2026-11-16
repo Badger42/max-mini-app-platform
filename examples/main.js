@@ -1,6 +1,6 @@
 // Example bootstrap for Vue CLI + Vue 3.
-// Merge this flow into your existing src/main.js; keep your Router, store,
-// Axios and other plugins where they are currently registered.
+// Merge this flow into your existing src/main.js and keep your existing
+// Router, store, Axios and other plugin registrations before mount().
 
 import { createApp } from 'vue'
 import App from '../src/App.vue'
@@ -12,44 +12,48 @@ import createPlatform from '../src/platform/createPlatform.js'
 import PlatformPlugin from '../src/plugins/platform.js'
 
 async function bootstrap() {
-  const environment = detectPlatform()
-  let platform
+  const detectedPlatform = detectPlatform()
+  const bridgeType = detectedPlatform === 'web' ? null : detectedPlatform
 
-  if (environment === 'max') {
+  let bridge = null
+  let bridgeError = null
+
+  if (bridgeType === 'max') {
     try {
-      const webApp = await loadMaxBridge({ timeoutMs: 5000 })
-      platform = createPlatform({ environment: 'max', webApp })
+      bridge = await loadMaxBridge({ timeoutMs: 5000 })
     } catch (error) {
+      bridgeError = error
       console.error('[platform] MAX Bridge unavailable:', error)
-      platform = createPlatform({ environment: 'max-fallback', error })
     }
-  } else if (environment === 'telegram') {
+  } else if (bridgeType === 'telegram') {
     try {
-      const webApp = await loadTelegramBridge({ timeoutMs: 5000 })
-      platform = createPlatform({ environment: 'telegram', webApp })
+      bridge = await loadTelegramBridge({ timeoutMs: 5000 })
     } catch (error) {
+      bridgeError = error
       console.error('[platform] Telegram SDK unavailable:', error)
-      platform = createPlatform({ environment: 'telegram-fallback', error })
     }
-  } else {
-    // Ordinary website: do not request either platform CDN.
-    platform = createPlatform({ environment: 'web' })
   }
+
+  const platform = createPlatform({
+    bridgeType,
+    bridge,
+    error: bridgeError
+  })
 
   const app = createApp(App)
   app.use(PlatformPlugin, platform)
 
-  // Register existing Router/store/other plugins here, before mount.
+  // Register existing Router/store/other plugins here, before mount().
   // app.use(router)
   // app.use(store)
 
   app.mount('#app')
 
   // Telegram hides its loading placeholder after essential UI is mounted.
-  // MAX and Web adapters expose a no-op ready() for a stable bootstrap contract.
+  // MAX and Web adapters expose a no-op ready() for a common bootstrap API.
   platform.ready()
 }
 
-bootstrap().catch((error) => {
+bootstrap().catch(error => {
   console.error('[app] Bootstrap failed:', error)
 })

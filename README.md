@@ -1,23 +1,21 @@
-# MAX Mini App platform adapter for Vue 3 / Vue CLI
+# Cross-platform Mini App adapter for Vue 3 / Vue CLI
 
 A small integration scaffold for an existing Vue 3 application using Options API.
-It does not change the app's colours, UI components, Vue Router, Axios or existing
-cookie authentication. No MAX or Telegram authentication is implemented.
+It supports regular Web, MAX Mini Apps and Telegram Mini Apps without changing
+the app's colours, UI components, Vue Router, Axios or existing cookie
+authentication. No MAX or Telegram authentication is implemented.
 
 ## Short integration plan
 
 1. Copy `src/platform` and `src/plugins/platform.js` into the matching folders of
    your Vue CLI project.
 2. Do **not** add MAX or Telegram SDK script tags to `public/index.html`.
-   The appropriate SDK is loaded dynamically only after its launch parameters
-   have been detected.
+   The selected SDK is loaded dynamically only after its launch parameters have
+   been detected.
 3. Merge the bootstrap flow from `examples/main.js` into your current `src/main.js`.
    Keep your existing Router, store and other plugin registrations before `mount()`.
-4. Use `this.$platform` in Options API components for platform features.
-5. Connect the existing file-download flow to `this.$platform.downloadFile()`.
-   For MAX, call it synchronously from the user's click handler with a direct HTTPS
-   file URL. Do not await an API request before calling the native method.
-6. Test MAX and Telegram on Android, iOS and Desktop, plus the ordinary website.
+4. Use `this.$platform` in Options API components.
+5. Test regular Web, MAX Android/iOS/Desktop and Telegram Android/iOS/Desktop.
 
 ## Runtime detection and conditional SDK loading
 
@@ -33,7 +31,7 @@ Only the detected SDK is dynamically injected:
 - MAX: `https://st.max.ru/js/max-web-app.js`
 - Telegram: `https://telegram.org/js/telegram-web-app.js?65`
 
-Regular web users do not request either platform CDN. SDK loading has a five
+Regular Web users do not request either platform CDN. SDK loading has a five
 second timeout by default. On failure, the app starts with the corresponding
 fallback adapter; the selected adapter is not switched automatically later in
 the same page lifecycle.
@@ -43,62 +41,83 @@ Both MAX and Telegram use the URL fragment for launch parameters, so
 `createWebHistory()` with an SPA fallback on the frontend server, or implement
 and test a deliberate fragment hand-off before using hash history.
 
-## Using the adapter from Options API
+## Unified public API
+
+All adapters expose the same platform-neutral API:
 
 ```js
-export default {
-  methods: {
-    openHelp() {
-      this.$platform.openExternalLink('https://example.com/help')
-    },
+this.$platform.bridgeType
+this.$platform.bridgeAvailable
+this.$platform.bridgeError
 
-    downloadPreparedFile(file) {
-      // file.url should already be available before the click.
-      // In MAX, this must be invoked directly from the click handler.
-      return this.$platform.downloadFile(file.url, file.fileName)
-    }
-  }
-}
+this.$platform.openExternalLink(url)
+this.$platform.openPlatformLink(url)
+
+this.$platform.downloadFile(url, fileName)
+this.$platform.shareUrl(url, text)
+this.$platform.sharePreparedMessage(params)
+
+this.$platform.backButton.show()
+this.$platform.backButton.hide()
+this.$platform.backButton.onClick(handler)
 ```
 
-Available adapter members:
+`bridgeType` is `null`, `'max'` or `'telegram'`. It identifies the host SDK,
+not the physical device. `bridgeAvailable` indicates whether the SDK loaded.
+The pair replaces the overlapping `isMax`, `isTelegram` and `environment`
+properties.
 
-- `environment`: `web`, `max`, `max-fallback`, `telegram` or `telegram-fallback`.
-- `isMax`, `isTelegram`, `bridgeAvailable`, `bridgeError`, `runtime`, `capabilities`.
-- `downloadFile(url, fileName, options?)`.
-- `openExternalLink(url)`, `openMaxLink(url)`, `openTelegramLink(url)`.
-- `shareUrl(url, text?)` and `sharePreparedMessage({ messageId, chatType? })`.
-- `backButton.show()`, `backButton.hide()`, `backButton.onClick(handler)`.
-  `onClick` returns an unsubscribe function.
-- `enableClosingConfirmation()`, `disableClosingConfirmation()`.
+The old `openMaxLink()` and `openTelegramLink()` methods are replaced by
+`openPlatformLink()`:
 
-`capabilities` describes native functions available in the selected runtime. Do
-not assume a capability exists just because the app was opened in MAX; feature
-availability can vary by client version.
+| Adapter | `openExternalLink(url)` | `openPlatformLink(url)` |
+|---|---|---|
+| MAX | `WebApp.openLink(url)` | `WebApp.openMaxLink(url)` |
+| Telegram | `WebApp.openLink(url)` | `WebApp.openTelegramLink(url)` |
+| Web | `window.open(url, '_blank')` | `window.open(url, '_blank')` |
+
+`openPlatformLink()` is relative to the current host. It does not make a MAX
+deep link open natively from Telegram, or a Telegram deep link open natively
+from MAX.
+
+### Capabilities
+
+Every adapter exposes the same boolean capability keys:
+
+- `nativeDownload`
+- `backButton`
+- `nativeExternalLinks`
+- `nativePlatformLinks`
+- `closingConfirmation`
+- `shareUrl`
+- `sharePreparedMessage`
+
+Use capabilities to decide whether to show UI that requires a native feature.
+All adapter methods remain present; unsupported calls fail predictably or are
+safe no-ops.
+
+See [docs/platform-api.md](docs/platform-api.md) for the migration details.
 
 ## File downloading
 
 ### MAX
 
 The adapter calls `window.WebApp.downloadFile(url, fileName)`. MAX requires an
-HTTPS URL and a user click. The native method returns `{ status: 'downloading' }`
-or `{ status: 'cancelled' }`; `downloading` means accepted/started, not completed.
-The documented API does not expose a download-progress or completion callback.
+HTTPS URL and a user click. The returned status `downloading` means accepted or
+started, not completed. The documented API does not expose a progress or
+completion callback.
 
-Prepare the file URL before the click. If your API endpoint requires an HttpOnly
+Prepare the file URL before the click. If the endpoint requires an HttpOnly
 cookie, do not assume the native downloader forwards that cookie or arbitrary
-headers. Prefer a short-lived, scoped HTTPS download URL (for example, a signed
-object-storage URL or an opaque backend ticket). Do not put permanent credentials
-in the URL.
+headers. Prefer a short-lived, scoped HTTPS download URL. Do not put permanent
+credentials in the URL.
 
 ### Telegram
 
-The adapter calls `Telegram.WebApp.downloadFile({ url, file_name }, callback)`.
-The callback reports whether the user accepted the download prompt; it does not
-confirm that the file has finished downloading. Telegram recommends that the
-file response include `Content-Disposition: attachment; filename="..."` and
-`Access-Control-Allow-Origin: https://web.telegram.org` for consistent behavior,
-especially in Telegram Web.
+The adapter calls
+`Telegram.WebApp.downloadFile({ url, file_name }, callback)`. The callback
+reports whether the user accepted the download prompt; it does not confirm
+that the file has finished downloading.
 
 ### Web and platform fallbacks
 
@@ -109,79 +128,80 @@ accepts `options.credentials`:
 - Use `include` only if a cross-origin endpoint needs cookies and its CORS policy
   explicitly allows the frontend origin and credentialed requests.
 
-For signed storage URLs, `same-origin` (or a deliberately configured `omit`) is
-usually preferable. The API must allow CORS for cross-origin fetches. The helper
-returns `{ status: 'requested' }`, not proof that the browser finished saving it.
+For signed storage URLs, `same-origin` (or a deliberately configured `omit`)
+is usually preferable. The API must allow CORS for cross-origin fetches. If your
+existing website already has a reliable Axios/Blob download implementation,
+keep it behind `webAdapter.downloadFile()`.
 
-If your current website already has a reliable Axios/Blob download implementation,
-you can keep it: move that implementation behind `webAdapter.downloadFile()`
-instead of replacing it with the generic helper.
+## Sharing
 
-## Sharing content
+Use `shareUrl(url, text?)` for a normal HTTPS link:
 
-Use `this.$platform.shareUrl(url, text)` to share a link. MAX uses
-`shareMaxContent({ link, text })`, Telegram opens its `t.me/share/url` composer,
-and Web uses `navigator.share()` where available or copies the URL to the clipboard.
-The Telegram result `{ status: 'opened' }` means the share composer opened; it does
-not prove that the user sent the message.
+- MAX uses `shareMaxContent({ link, text })`.
+- Telegram opens Telegram's `t.me/share/url` composer.
+- Web uses `navigator.share()` where available, or copies the URL to the clipboard.
 
-For prepared media/files, use `sharePreparedMessage()` after the backend has
-prepared a platform-specific message:
+Use `sharePreparedMessage()` only after the backend has prepared a platform-
+specific message:
 
 ```js
 // MAX: messageId is the `mid` returned by Bot API POST /messages.
-this.$platform.sharePreparedMessage({ messageId: maxMid, chatType: 'DIALOG' })
+this.$platform.sharePreparedMessage({
+  messageId: maxMid,
+  chatType: 'DIALOG'
+})
 
 // Telegram: messageId is returned by Bot API savePreparedInlineMessage.
-this.$platform.sharePreparedMessage({ messageId: telegramPreparedMessageId })
+this.$platform.sharePreparedMessage({
+  messageId: telegramPreparedMessageId
+})
 ```
 
-The IDs and backend workflows are different. Telegram's `shareMessage()` requires
-a prepared inline message ID (Bot API 8.0+); MAX requires a bot message `mid` and
+The IDs and backend workflows are different. Telegram's `shareMessage()`
+requires a PreparedInlineMessage ID; MAX requires a bot message `mid` and
 `chatType` (`DIALOG` or `CHAT`). Keep bot tokens and Bot API calls on the backend.
 
 ## Modals and BackButton
 
 Existing Vue modal components do not need to be rewritten. They remain HTML/CSS
-inside the WebView. Check fixed positioning, stacking (`z-index`), scroll locking,
-keyboard/viewport behaviour on iOS, and whether transformed/overflow-hidden
-ancestors affect `position: fixed`.
+inside the WebView. Check fixed positioning, stacking (`z-index`), scroll
+locking, keyboard/viewport behaviour on iOS, and whether transformed or
+overflow-hidden ancestors affect `position: fixed`.
 
-Connect the single platform BackButton handler to your existing modal manager and Vue
-Router: close the topmost open modal first; otherwise navigate back if your app
-has an internal previous route. Register the handler once and call the returned
-unsubscribe function when the navigation manager is disposed. This scaffold
-exposes the BackButton API but intentionally does not assume a particular modal
-library or Router setup.
+Connect the single platform BackButton handler to your existing modal manager
+and Vue Router: close the topmost open modal first; otherwise navigate back if
+your app has an internal previous route. Register the handler once and call the
+returned unsubscribe function when the navigation manager is disposed. The
+scaffold intentionally does not assume a particular modal library or Router
+setup.
 
 Telegram's `WebApp.ready()` is called by the example bootstrap after Vue mounts;
-MAX and Web adapters expose a no-op `ready()` method for a stable bootstrap API.
+MAX and Web adapters expose a no-op `ready()` for a stable bootstrap API.
 
 ## Separate frontend and backend domains
 
 This scaffold does not change authentication. Existing Axios and HttpOnly Cookie
 authentication continue as before, subject to browser/WebView cookie rules. For
 Blob fallback downloads across origins, check CORS and credential settings. For
-native MAX and Telegram downloads, prefer a short-lived file URL so the native
-downloader does not need the frontend's cookie.
+native MAX and Telegram downloads, prefer short-lived file URLs so the native
+downloaders do not need the frontend's cookie.
 
 ## Notes
 
 - No static MAX or Telegram SDK `<script>` tag is required.
 - No MAX or Telegram login/authentication flow is included.
 - All examples are JavaScript and compatible with the Options API approach.
-- The `examples/main.js` file is an integration example; do not overwrite your
-  real `main.js` without merging your existing imports and plugin registrations.
+- Merge the example bootstrap into your real `main.js`; do not overwrite existing
+  Router/store/plugin registrations.
+- `bridgeType`/`bridgeAvailable` supersede `isMax`, `isTelegram` and
+  `environment`. `openPlatformLink()` supersedes platform-specific link methods.
 
 ## Optional BackButton integration
 
-`src/platform/bindBackButton.js` is a small helper for connecting the MAX button
-with your existing modal manager and Router. It does not depend on a modal
-package. Supply four callbacks/references: `router`, `hasOpenModal`,
-`closeTopModal`, and `canGoBack`. The helper closes the top modal first; only
-when there is no modal does it call `router.back()`. Call `refresh()` after a
-modal opens/closes. `router.afterEach()` refreshes visibility after navigation.
+`src/platform/bindBackButton.js` connects the selected platform's BackButton to
+your existing modal manager and Router. It supplies one common API for MAX and
+Telegram. Call `refresh()` after a modal opens/closes, and call `dispose()` when
+the navigation manager is disposed.
 
-See `examples/backButtonIntegration.js` for the expected shape. Replace the
-illustrative `$modalManager` and `$navigationHistory` APIs with your project's
-actual APIs; they are placeholders, not Vue built-ins.
+See `examples/backButtonIntegration.js` for the expected shape. Replace
+illustrative modal/navigation APIs with your project's actual APIs.

@@ -1,17 +1,15 @@
 import createWebAdapter from './webAdapter.js'
 
 /**
- * The launch URL says this is MAX, but the Bridge did not become available.
- * Keep regular web functionality and explicitly report missing native features.
+ * MAX launch parameters were detected, but the MAX Bridge is unavailable.
+ * Preserve browser functionality and expose the selected host through bridgeType.
  */
 export default function createMaxFallbackAdapter(error, options = {}) {
   const web = createWebAdapter(options)
 
   return {
     ...web,
-    environment: 'max-fallback',
-    isMax: true,
-    isTelegram: false,
+    bridgeType: 'max',
     bridgeAvailable: false,
     bridgeError: error || new Error('MAX Bridge is unavailable'),
 
@@ -20,8 +18,7 @@ export default function createMaxFallbackAdapter(error, options = {}) {
       nativeDownload: false,
       backButton: false,
       nativeExternalLinks: false,
-      nativeMaxLinks: false,
-      nativeTelegramLinks: false,
+      nativePlatformLinks: false,
       closingConfirmation: false,
       sharePreparedMessage: false
     }

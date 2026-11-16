@@ -1,22 +1,15 @@
 import downloadBlob from './downloadBlob.js'
-
-function requireHttpsUrl(value, methodName) {
-  let url
-  try {
-    url = new URL(value)
-  } catch (_) {
-    throw new TypeError(`${methodName}: a valid absolute URL is required`)
-  }
-
-  if (url.protocol !== 'https:') {
-    throw new TypeError(`${methodName}: only HTTPS URLs are supported`)
-  }
-
-  return url.href
-}
+import {
+  requireHttpsUrl,
+  openInBrowser,
+  createBackButton,
+  createClosingConfirmation
+} from './adapterUtils.js'
 
 function unavailable(methodName) {
-  return Promise.reject(new Error(`Telegram ${methodName} is not available in this client version`))
+  return Promise.reject(
+    new Error(`Telegram ${methodName} is not available in this client version`)
+  )
 }
 
 function supportsVersion(webApp, requiredVersion) {
@@ -34,6 +27,7 @@ function supportsVersion(webApp, requiredVersion) {
   for (let index = 0; index < required.length; index += 1) {
     const currentPart = current[index] || 0
     const requiredPart = required[index] || 0
+
     if (currentPart > requiredPart) return true
     if (currentPart < requiredPart) return false
   }
@@ -46,22 +40,17 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
     throw new TypeError('A valid window.Telegram.WebApp object is required')
   }
 
-  const nativeBackButton = webApp.BackButton
+  const backButton = createBackButton(webApp.BackButton)
+  const closingConfirmation = createClosingConfirmation(webApp)
+
   const supportsBotApi8 = supportsVersion(webApp, '8.0')
   const hasNativeDownload = supportsBotApi8 && typeof webApp.downloadFile === 'function'
   const hasShareMessage = supportsBotApi8 && typeof webApp.shareMessage === 'function'
-  const hasBackButton = Boolean(
-    nativeBackButton &&
-    typeof nativeBackButton.show === 'function' &&
-    typeof nativeBackButton.hide === 'function' &&
-    typeof nativeBackButton.onClick === 'function' &&
-    typeof nativeBackButton.offClick === 'function'
-  )
+  const hasExternalLinks = typeof webApp.openLink === 'function'
+  const hasPlatformLinks = typeof webApp.openTelegramLink === 'function'
 
   return {
-    environment: 'telegram',
-    isMax: false,
-    isTelegram: true,
+    bridgeType: 'telegram',
     bridgeAvailable: true,
     bridgeError: null,
 
@@ -73,22 +62,17 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
 
     capabilities: {
       nativeDownload: hasNativeDownload,
-      backButton: hasBackButton,
-      nativeExternalLinks: typeof webApp.openLink === 'function',
-      nativeTelegramLinks: typeof webApp.openTelegramLink === 'function',
-      nativeMaxLinks: false,
-      closingConfirmation: (
-        typeof webApp.enableClosingConfirmation === 'function' &&
-        typeof webApp.disableClosingConfirmation === 'function'
-      ),
-      shareUrl: typeof webApp.openTelegramLink === 'function',
+      backButton: backButton.supported,
+      nativeExternalLinks: hasExternalLinks,
+      nativePlatformLinks: hasPlatformLinks,
+      closingConfirmation: closingConfirmation.supported,
+      shareUrl: hasPlatformLinks,
       sharePreparedMessage: hasShareMessage
     },
 
     /**
-     * Telegram's native downloader accepts { url, file_name } and invokes the
-     * callback with true when the user accepts the download request. This does
-     * not mean that the file has finished downloading.
+     * Telegram's downloader accepts { url, file_name } and calls back with
+     * whether the user accepted the request. It does not report completion.
      * Invoke directly from the user's click handler.
      */
     downloadFile(url, fileName, options = {}) {
@@ -103,7 +87,7 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
           try {
             webApp.downloadFile(
               { url: validUrl, file_name: fileName },
-              (accepted) => resolve({ status: accepted ? 'accepted' : 'cancelled' })
+              accepted => resolve({ status: accepted ? 'accepted' : 'cancelled' })
             )
           } catch (error) {
             reject(error)
@@ -119,58 +103,59 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
 
     openExternalLink(url) {
       const validUrl = requireHttpsUrl(url, 'openExternalLink')
-      if (typeof webApp.openLink === 'function') {
+
+      if (hasExternalLinks) {
         return webApp.openLink(validUrl)
       }
-      return window.open(validUrl, '_blank', 'noopener,noreferrer')
-    },
 
-    openTelegramLink(url) {
-      const validUrl = requireHttpsUrl(url, 'openTelegramLink')
-      if (typeof webApp.openTelegramLink === 'function') {
-        return webApp.openTelegramLink(validUrl)
-      }
-      return window.open(validUrl, '_blank', 'noopener,noreferrer')
-    },
-
-    // Kept for the common adapter shape. A MAX deep link is not a Telegram
-    // deep link, so Telegram opens it as an ordinary external URL.
-    openMaxLink(url) {
-      const validUrl = requireHttpsUrl(url, 'openMaxLink')
-      if (typeof webApp.openLink === 'function') {
-        return webApp.openLink(validUrl)
-      }
-      return window.open(validUrl, '_blank', 'noopener,noreferrer')
+      return openInBrowser(validUrl)
     },
 
     /**
-     * Opens Telegram's native chat picker for a URL.
-     * The returned "opened" status means the picker was invoked, not that the
-     * user actually sent the message.
+     * Opens a link handled by the current host platform.
+     * Telegram maps this to WebApp.openTelegramLink().
+     */
+    openPlatformLink(url) {
+      const validUrl = requireHttpsUrl(url, 'openPlatformLink')
+
+      if (hasPlatformLinks) {
+        return webApp.openTelegramLink(validUrl)
+      }
+
+      return openInBrowser(validUrl)
+    },
+
+    /**
+     * Opens Telegram's official share URL composer.
+     * "opened" means the composer was invoked, not that content was sent.
      */
     shareUrl(url, text = '') {
       const validUrl = requireHttpsUrl(url, 'shareUrl')
       const shareLink = new URL('https://t.me/share/url')
       shareLink.searchParams.set('url', validUrl)
-      if (text) shareLink.searchParams.set('text', String(text))
 
-      if (typeof webApp.openTelegramLink === 'function') {
+      if (text) {
+        shareLink.searchParams.set('text', String(text))
+      }
+
+      if (hasPlatformLinks) {
         webApp.openTelegramLink(shareLink.toString())
       } else {
-        window.open(shareLink.toString(), '_blank', 'noopener,noreferrer')
+        openInBrowser(shareLink.toString())
       }
 
       return Promise.resolve({ status: 'opened' })
     },
 
     /**
-     * Shares a PreparedInlineMessage ID returned by the backend after calling
-     * Telegram Bot API savePreparedInlineMessage. This is not an arbitrary
-     * message ID and is different from MAX's `mid` value.
+     * messageId is a PreparedInlineMessage ID returned by Bot API
+     * savePreparedInlineMessage. It is not an arbitrary Telegram message ID.
      */
     sharePreparedMessage({ messageId } = {}) {
       if (!messageId || typeof messageId !== 'string') {
-        return Promise.reject(new TypeError('A Telegram prepared inline message ID is required'))
+        return Promise.reject(
+          new TypeError('A Telegram prepared inline message ID is required')
+        )
       }
 
       if (!hasShareMessage) {
@@ -179,7 +164,7 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
 
       return new Promise((resolve, reject) => {
         try {
-          webApp.shareMessage(messageId, (sent) => {
+          webApp.shareMessage(messageId, sent => {
             resolve({ status: sent ? 'shared' : 'cancelled' })
           })
         } catch (error) {
@@ -188,37 +173,17 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
       })
     },
 
-    backButton: {
-      show() {
-        if (nativeBackButton && typeof nativeBackButton.show === 'function') {
-          nativeBackButton.show()
-        }
-      },
-      hide() {
-        if (nativeBackButton && typeof nativeBackButton.hide === 'function') {
-          nativeBackButton.hide()
-        }
-      },
-      onClick(handler) {
-        if (!hasBackButton) return () => {}
-        nativeBackButton.onClick(handler)
-        return () => nativeBackButton.offClick(handler)
-      }
-    },
+    backButton,
 
     enableClosingConfirmation() {
-      if (typeof webApp.enableClosingConfirmation === 'function') {
-        return webApp.enableClosingConfirmation()
-      }
+      return closingConfirmation.enable()
     },
 
     disableClosingConfirmation() {
-      if (typeof webApp.disableClosingConfirmation === 'function') {
-        return webApp.disableClosingConfirmation()
-      }
+      return closingConfirmation.disable()
     },
 
-    // Call after the Vue app has mounted so Telegram can hide its loading screen.
+    // Telegram must be told when the app's essential UI is ready.
     ready() {
       if (typeof webApp.ready === 'function') {
         return webApp.ready()

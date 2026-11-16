@@ -1,14 +1,19 @@
 import downloadBlob from './downloadBlob.js'
-
-function unavailable(methodName) {
-  return Promise.reject(new Error(`${methodName} is not available in a regular browser`))
-}
+import { openInBrowser, unavailable } from './adapterUtils.js'
 
 export default function createWebAdapter({ downloadOptions = {} } = {}) {
+  const hasWebShare = (
+    typeof navigator !== 'undefined' &&
+    typeof navigator.share === 'function'
+  )
+  const hasClipboard = (
+    typeof navigator !== 'undefined' &&
+    navigator.clipboard &&
+    typeof navigator.clipboard.writeText === 'function'
+  )
+
   return {
-    environment: 'web',
-    isMax: false,
-    isTelegram: false,
+    bridgeType: null,
     bridgeAvailable: false,
     bridgeError: null,
 
@@ -22,14 +27,9 @@ export default function createWebAdapter({ downloadOptions = {} } = {}) {
       nativeDownload: false,
       backButton: false,
       nativeExternalLinks: false,
-      nativeMaxLinks: false,
-      nativeTelegramLinks: false,
+      nativePlatformLinks: false,
       closingConfirmation: false,
-      shareUrl: Boolean(
-        typeof navigator !== 'undefined' &&
-        (typeof navigator.share === 'function' ||
-          (navigator.clipboard && typeof navigator.clipboard.writeText === 'function'))
-      ),
+      shareUrl: Boolean(hasWebShare || hasClipboard),
       sharePreparedMessage: false
     },
 
@@ -41,22 +41,16 @@ export default function createWebAdapter({ downloadOptions = {} } = {}) {
     },
 
     openExternalLink(url) {
-      const opened = window.open(url, '_blank', 'noopener,noreferrer')
-      return Boolean(opened)
+      return openInBrowser(url)
     },
 
-    openMaxLink(url) {
-      const opened = window.open(url, '_blank', 'noopener,noreferrer')
-      return Boolean(opened)
-    },
-
-    openTelegramLink(url) {
-      const opened = window.open(url, '_blank', 'noopener,noreferrer')
-      return Boolean(opened)
+    openPlatformLink(url) {
+      // A regular browser has no host-specific deep-link API.
+      return openInBrowser(url)
     },
 
     async shareUrl(url, text = '') {
-      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      if (hasWebShare) {
         try {
           await navigator.share({ url, text: text || undefined })
           return { status: 'shared' }
@@ -68,8 +62,7 @@ export default function createWebAdapter({ downloadOptions = {} } = {}) {
         }
       }
 
-      if (typeof navigator !== 'undefined' && navigator.clipboard &&
-          typeof navigator.clipboard.writeText === 'function') {
+      if (hasClipboard) {
         await navigator.clipboard.writeText(text ? `${text}\n${url}` : url)
         return { status: 'copied' }
       }
@@ -82,6 +75,7 @@ export default function createWebAdapter({ downloadOptions = {} } = {}) {
     },
 
     backButton: {
+      supported: false,
       show() {},
       hide() {},
       onClick() {
