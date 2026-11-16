@@ -1,4 +1,4 @@
-import createWebAdapter from './webAdapter'
+import createWebAdapter from './webAdapter.js'
 
 /**
  * The launch URL says this is MAX, but the Bridge did not become available.
@@ -11,17 +11,19 @@ export default function createMaxFallbackAdapter(error, options = {}) {
     ...web,
     environment: 'max-fallback',
     isMax: true,
+    isTelegram: false,
     bridgeAvailable: false,
     bridgeError: error || new Error('MAX Bridge is unavailable'),
 
-    // These capabilities require the native MAX client and cannot be emulated.
     capabilities: {
       ...web.capabilities,
       nativeDownload: false,
       backButton: false,
       nativeExternalLinks: false,
       nativeMaxLinks: false,
-      closingConfirmation: false
+      nativeTelegramLinks: false,
+      closingConfirmation: false,
+      sharePreparedMessage: false
     }
   }
 }

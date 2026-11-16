@@ -1,9 +1,14 @@
-import downloadBlob from './downloadBlob'
+import downloadBlob from './downloadBlob.js'
+
+function unavailable(methodName) {
+  return Promise.reject(new Error(`${methodName} is not available in a regular browser`))
+}
 
 export default function createWebAdapter({ downloadOptions = {} } = {}) {
   return {
     environment: 'web',
     isMax: false,
+    isTelegram: false,
     bridgeAvailable: false,
     bridgeError: null,
 
@@ -18,7 +23,14 @@ export default function createWebAdapter({ downloadOptions = {} } = {}) {
       backButton: false,
       nativeExternalLinks: false,
       nativeMaxLinks: false,
-      closingConfirmation: false
+      nativeTelegramLinks: false,
+      closingConfirmation: false,
+      shareUrl: Boolean(
+        typeof navigator !== 'undefined' &&
+        (typeof navigator.share === 'function' ||
+          (navigator.clipboard && typeof navigator.clipboard.writeText === 'function'))
+      ),
+      sharePreparedMessage: false
     },
 
     downloadFile(url, fileName, options = {}) {
@@ -38,6 +50,37 @@ export default function createWebAdapter({ downloadOptions = {} } = {}) {
       return Boolean(opened)
     },
 
+    openTelegramLink(url) {
+      const opened = window.open(url, '_blank', 'noopener,noreferrer')
+      return Boolean(opened)
+    },
+
+    async shareUrl(url, text = '') {
+      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+        try {
+          await navigator.share({ url, text: text || undefined })
+          return { status: 'shared' }
+        } catch (error) {
+          if (error && error.name === 'AbortError') {
+            return { status: 'cancelled' }
+          }
+          throw error
+        }
+      }
+
+      if (typeof navigator !== 'undefined' && navigator.clipboard &&
+          typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(text ? `${text}\n${url}` : url)
+        return { status: 'copied' }
+      }
+
+      return unavailable('URL sharing')
+    },
+
+    sharePreparedMessage() {
+      return unavailable('Prepared-message sharing')
+    },
+
     backButton: {
       show() {},
       hide() {},
@@ -47,6 +90,7 @@ export default function createWebAdapter({ downloadOptions = {} } = {}) {
     },
 
     enableClosingConfirmation() {},
-    disableClosingConfirmation() {}
+    disableClosingConfirmation() {},
+    ready() {}
   }
 }

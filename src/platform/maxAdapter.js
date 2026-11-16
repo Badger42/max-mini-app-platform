@@ -1,4 +1,4 @@
-import downloadBlob from './downloadBlob'
+import downloadBlob from './downloadBlob.js'
 
 function requireHttpsUrl(value, methodName) {
   let url
@@ -26,6 +26,7 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
   return {
     environment: 'max',
     isMax: true,
+    isTelegram: false,
     bridgeAvailable: true,
     bridgeError: null,
 
@@ -46,10 +47,13 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
       ),
       nativeExternalLinks: typeof webApp.openLink === 'function',
       nativeMaxLinks: typeof webApp.openMaxLink === 'function',
+      nativeTelegramLinks: false,
       closingConfirmation: (
         typeof webApp.enableClosingConfirmation === 'function' &&
         typeof webApp.disableClosingConfirmation === 'function'
-      )
+      ),
+      shareUrl: typeof webApp.shareMaxContent === 'function',
+      sharePreparedMessage: typeof webApp.shareMaxContent === 'function'
     },
 
     downloadFile(url, fileName, options = {}) {
@@ -59,14 +63,11 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
         return Promise.reject(new TypeError('A file name is required'))
       }
 
-      // Invoke this method directly from the user's click handler. Do not await
-      // an API request before calling it: MAX checks for a user gesture.
+      // Invoke directly from the user's click handler; MAX checks for a user gesture.
       if (typeof webApp.downloadFile === 'function') {
         return webApp.downloadFile(validUrl, fileName)
       }
 
-      // Bridge exists but this capability is missing: use the documented
-      // fetch -> Blob fallback. CORS/credentials must be configured server-side.
       return downloadBlob(validUrl, fileName, {
         ...downloadOptions,
         ...options
@@ -87,6 +88,38 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
         return webApp.openMaxLink(validUrl)
       }
       return window.open(validUrl, '_blank', 'noopener,noreferrer')
+    },
+
+    openTelegramLink(url) {
+      const validUrl = requireHttpsUrl(url, 'openTelegramLink')
+      if (typeof webApp.openLink === 'function') return webApp.openLink(validUrl)
+      return window.open(validUrl, '_blank', 'noopener,noreferrer')
+    },
+
+    /** Share an HTTPS URL through the native MAX share sheet. */
+    shareUrl(url, text = '') {
+      const validUrl = requireHttpsUrl(url, 'shareUrl')
+      if (typeof webApp.shareMaxContent !== 'function') {
+        return Promise.reject(new Error('MAX shareMaxContent is unavailable'))
+      }
+      return webApp.shareMaxContent({ link: validUrl, ...(text ? { text: String(text) } : {}) })
+    },
+
+    /**
+     * Share a bot-prepared MAX message. messageId is MAX's `mid` returned by
+     * Bot API POST /messages; chatType must be DIALOG or CHAT.
+     */
+    sharePreparedMessage({ messageId, chatType }) {
+      if (!messageId || typeof messageId !== 'string') {
+        return Promise.reject(new TypeError('A MAX message ID (mid) is required'))
+      }
+      if (!['DIALOG', 'CHAT'].includes(chatType)) {
+        return Promise.reject(new TypeError('chatType must be DIALOG or CHAT'))
+      }
+      if (typeof webApp.shareMaxContent !== 'function') {
+        return Promise.reject(new Error('MAX shareMaxContent is unavailable'))
+      }
+      return webApp.shareMaxContent({ mid: messageId, chatType })
     },
 
     backButton: {
@@ -124,6 +157,9 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
       if (typeof webApp.disableClosingConfirmation === 'function') {
         return webApp.disableClosingConfirmation()
       }
-    }
+    },
+
+    // MAX does not require the Telegram-style ready() signal.
+    ready() {}
   }
 }
