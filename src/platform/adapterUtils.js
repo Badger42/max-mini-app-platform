@@ -62,13 +62,13 @@ export function createBackButton(nativeBackButton) {
     supported,
 
     show() {
-      if (nativeBackButton && typeof nativeBackButton.show === 'function') {
+      if (supported) {
         return nativeBackButton.show()
       }
     },
 
     hide() {
-      if (nativeBackButton && typeof nativeBackButton.hide === 'function') {
+      if (supported) {
         return nativeBackButton.hide()
       }
     },
@@ -118,35 +118,43 @@ export function createClosingConfirmation(bridge) {
 }
 
 /**
- * MAX reports `downloading`; Telegram reports whether the user accepted.
- * Both mean that a download was requested, not that bytes reached the device.
+ * MAX reports `downloading`; Telegram's callback is normalized to `accepted`.
+ * These statuses mean a request was accepted, not that bytes reached device.
+ * Unexpected responses are protocol errors rather than presumed successes.
  */
 export function normalizeDownloadResult(result) {
   const platformStatus = result && typeof result.status === 'string'
     ? result.status
     : null
 
-  if (platformStatus === 'cancelled') {
-    return { status: 'cancelled', platformStatus }
-  }
+  switch (platformStatus) {
+    case 'downloading':
+    case 'accepted':
+      return { status: 'requested', platformStatus }
 
-  return {
-    status: 'requested',
-    ...(platformStatus ? { platformStatus } : {})
+    case 'cancelled':
+      return { status: 'cancelled', platformStatus }
+
+    default:
+      throw new Error(
+        `Unexpected download result from platform SDK: ${platformStatus || 'missing status'}`
+      )
   }
 }
 
+/** MAX shareMaxContent() documents only `shared` and `cancelled` outcomes. */
 export function normalizeShareResult(result) {
-  if (result && typeof result === 'object') {
-    const status = result.status
-    if (['shared', 'cancelled', 'opened', 'copied', 'requested'].includes(status)) {
-      return result
-    }
+  const platformStatus = result && typeof result.status === 'string'
+    ? result.status
+    : null
 
-    return { status: 'requested', platformResult: result }
+  if (platformStatus === 'shared' || platformStatus === 'cancelled') {
+    return { status: platformStatus }
   }
 
-  return { status: 'requested' }
+  throw new Error(
+    `Unexpected share result from platform SDK: ${platformStatus || 'missing status'}`
+  )
 }
 
 export function unavailable(methodName) {

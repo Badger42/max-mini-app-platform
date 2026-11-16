@@ -64,10 +64,19 @@ export default function bindBackButton({
 
       if (canGoBack()) {
         navigationPending = true
-        router.back()
+        // Start the safety timer before invoking the router so a synchronous
+        // exception cannot leave navigationPending locked without a timer.
+        navigationTimer = setTimeout(releaseNavigation, navigationUnlockTimeoutMs)
+
+        try {
+          router.back()
+        } catch (error) {
+          releaseNavigation()
+          throw error
+        }
+
         // Vue Router's back() returns void. afterEach/onError release the lock;
         // the timeout is a safety net if the history traversal has no result.
-        navigationTimer = setTimeout(releaseNavigation, navigationUnlockTimeoutMs)
         return
       }
 

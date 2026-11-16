@@ -159,7 +159,12 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
       }
 
       if (hasPlatformLinks) {
-        webApp.openTelegramLink(shareLink.toString())
+        try {
+          webApp.openTelegramLink(shareLink.toString())
+        } catch (error) {
+          return Promise.reject(error)
+        }
+
         return Promise.resolve({ status: 'opened' })
       }
 
@@ -202,7 +207,7 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
       return closingConfirmation.disable()
     },
 
-    // Telegram must be told when the app's essential UI is ready.
+    // Telegram must be told when its essential UI is ready.
     ready() {
       if (typeof webApp.ready === 'function') {
         return webApp.ready()

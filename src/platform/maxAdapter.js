@@ -18,7 +18,10 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
   const closingConfirmation = createClosingConfirmation(webApp)
   const webFallback = createWebAdapter({ downloadOptions })
 
-  const hasNativeDownload = typeof webApp.downloadFile === 'function'
+  // MAX Bridge exposes the method in some browser contexts, but native file
+  // downloads are not supported when the host-reported platform is `web`.
+  const hasNativeDownload = webApp.platform !== 'web' &&
+    typeof webApp.downloadFile === 'function'
   const hasExternalLinks = typeof webApp.openLink === 'function'
   const hasPlatformLinks = typeof webApp.openMaxLink === 'function'
   const hasShareUrl = typeof webApp.shareMaxContent === 'function'
@@ -60,7 +63,13 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
 
       // Invoke the native method synchronously to preserve the user gesture.
       if (hasNativeDownload) {
-        const result = webApp.downloadFile(validUrl, fileName)
+        let result
+        try {
+          result = webApp.downloadFile(validUrl, fileName)
+        } catch (error) {
+          return Promise.reject(error)
+        }
+
         return Promise.resolve(result).then(normalizeDownloadResult)
       }
 
@@ -104,10 +113,16 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
       }
 
       // Invoke synchronously; the SDK owns its native UI lifecycle.
-      const result = webApp.shareMaxContent({
-        link: validUrl,
-        ...(text ? { text: String(text) } : {})
-      })
+      let result
+      try {
+        result = webApp.shareMaxContent({
+          link: validUrl,
+          ...(text ? { text: String(text) } : {})
+        })
+      } catch (error) {
+        return Promise.reject(error)
+      }
+
       return Promise.resolve(result).then(normalizeShareResult)
     },
 
@@ -128,7 +143,13 @@ export default function createMaxAdapter(webApp, { downloadOptions = {} } = {}) 
         return Promise.reject(new Error('MAX shareMaxContent is unavailable'))
       }
 
-      const result = webApp.shareMaxContent({ mid: messageId, chatType })
+      let result
+      try {
+        result = webApp.shareMaxContent({ mid: messageId, chatType })
+      } catch (error) {
+        return Promise.reject(error)
+      }
+
       return Promise.resolve(result).then(normalizeShareResult)
     },
 

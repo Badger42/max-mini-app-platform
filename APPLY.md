@@ -35,7 +35,7 @@ this.$platform.bridgeType === 'telegram'
 this.$platform.openPlatformLink(url)
 ```
 
-`bridgeType` is `null` for Web, `'max'` for MAX, and `'telegram'` for Telegram.
+`bridgeType` is `null` for Web, `'max'` for MAX, and `'telegram' for Telegram.
 `bridgeAvailable` independently tells whether the relevant SDK loaded. The
 separate `environment` property has been removed because it duplicated these
 two values.

@@ -310,7 +310,7 @@ test('BackButton locks repeated router-back requests until navigation settles', 
         afterEachHandler = handler
         return () => { afterEachHandler = null }
       },
-      onError(handler) {
+      onError() {
         return () => {}
       }
     },

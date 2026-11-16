@@ -6,7 +6,7 @@ provides JSDoc types without introducing a TypeScript build step.
 
 ## Runtime identity
 
-- `bridgeType`: `null` for Web, `'max'` or `'telegram'` for a recognized host.
+- `bridgeType`: `null` for Web, `'max'`` or `'telegram'` for a recognized host.
 - `bridgeAvailable`: whether that host's SDK loaded successfully.
 - `bridgeError`: the SDK loading failure, if any.
 - `runtime.clientPlatform` and `runtime.clientVersion`: values reported by the
