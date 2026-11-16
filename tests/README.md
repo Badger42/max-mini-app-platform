@@ -9,16 +9,18 @@ Run the complete suite:
 npm test
 ```
 
-Run only the platform tests:
+Run platform and integration tests:
 
 ```bash
 npm run test:platform
 ```
 
-The tests cover runtime detection, duplicate launch parameters, adapter
-selection, common adapter contracts, URL validation, result normalization,
-BackButton lifecycle/concurrency, Bridge loading, timeout, retry and late-load
-behavior.
+The tests cover Launch Context detection, duplicate/conflicting parameters,
+raw-data exclusion, adapter selection, MAX fallback context preservation,
+download-service delegation, relative URLs, native download user-gesture
+synchrony, URL validation, status normalization, BackButton lifecycle and MAX
+Bridge loading/timeout behavior.
 
-Automated tests do not replace integration testing inside real MAX and
-Telegram clients (Android, iOS, Desktop and Web).
+Automated tests do not replace integration testing inside real MAX clients
+(Android, iOS and Desktop), especially for native download and WebView cookie
+behavior.

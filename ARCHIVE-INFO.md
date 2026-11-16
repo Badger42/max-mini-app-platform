@@ -1,16 +1,20 @@
-# Archive information
+# Phase 2 overlay information
 
-This archive contains the complete repository file tree from `Badger42/max-mini-app-platform` at commit `5beac14af656875cac958cf66577b14627e361a4` (the `main` snapshot reviewed for Stage 1), with Stage 1 fixes applied in-place.
+This archive contains the implementation overlay for `max-mini-app-platform`
+after Stage 1, based on commit `cb38e600fd90d35c1bd095780299255f561f9772`.
 
-## Included Stage 1 fixes
+## Main changes
 
-- BackButton navigation lock is released when `router.back()` throws synchronously.
-- Incomplete native BackButton APIs are treated as unsupported by all methods.
-- Unknown/missing native download and MAX share statuses are rejected as protocol errors.
-- Native MAX `downloadFile()` is not advertised or invoked for `platform === 'web'`.
-- Synchronous exceptions from Promise-based MAX and Telegram sharing/download operations are returned as Promise rejections.
-- Added `tests/stage1-regressions.test.mjs`.
+- Restricts runtime support to Web and MAX.
+- Introduces a sanitized Launch Context and passes it through bootstrap,
+  adapter factory and MAX fallback.
+- Adds an injectable application download service for Web and fallback paths.
+- Keeps native MAX download as a separate synchronous user-gesture path.
+- Removes the obsolete generic fallback factory and old detector API.
+- Replaces platform integration docs and tests with Web + MAX contracts.
 
 ## Validation
 
-The complete Node test suite was run from the project root using `npm test`: **41 tests passed, 0 failed**. The archive is a source snapshot; it does not include `node_modules` or a deployment build. Real MAX WebView testing is still required.
+Run `npm test` and `npm run test:platform` with Node.js 20 or newer. Also test
+native download and existing application download-service integration inside a
+real MAX WebView. The latter cannot be validated by this standalone unit suite.

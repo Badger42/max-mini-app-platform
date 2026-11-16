@@ -1,9 +1,9 @@
-import bindBackButton from '../src/platform/bindBackButton'
+import bindBackButton from '../src/platform/bindBackButton.js'
 
 /**
- * Call this from your app's setup code, passing your real modal manager and
- * route-history API. The names below are intentionally generic; they are not
- * built-in Vue APIs.
+ * Connect one platform BackButton handler to the consuming app's existing
+ * modal manager and Router. The integration deliberately assumes no specific
+ * modal library or navigation-history implementation.
  */
 export default function setupBackButtonIntegration({
   platform,

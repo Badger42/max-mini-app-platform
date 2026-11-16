@@ -1,14 +1,68 @@
-# Unified Platform Adapter API
+# Platform Adapter API
 
-The adapter exposes one public contract for regular Web, MAX and Telegram.
-The detailed capability and operation-result definitions live in
-[Platform Adapter Contract](platform-contract.md).
+The module supports exactly two runtime types: a regular Web application and a
+MAX Mini App. It exposes the same adapter API through the Vue plugin as
+`this.$platform`.
 
-## Runtime identification
+## Launch context
 
-Use:
+Call `detectLaunchContext()` before creating Vue Router or mounting the app.
+The returned object has this shape:
 
 ```js
+{
+  type: 'max', // 'web' | 'max'
+  launch: {
+    platform: 'android', // 'ios' | 'android' | 'desktop' | 'web' | null
+    version: '...',
+  },
+  detection: {
+    status: 'valid', // 'valid' | 'absent' | 'invalid' | 'conflicting'
+    reason: null,
+  },
+}
+```
+
+A regular Web launch has `type: 'web'`, `launch: null`, and
+`detection.status: 'absent'`. Malformed or conflicting launch markers also fail
+closed to `type: 'web'`, but retain `invalid` or `conflicting` diagnostics. They
+do not cause a MAX Bridge request.
+
+Only the presence and shape of launch markers are inspected. The raw
+`WebAppData` value is never returned or copied into the adapter. Launch context
+is not authentication, proof of identity, or authorization to access data.
+
+## Bootstrap and factory
+
+```js
+const launchContext = detectLaunchContext()
+let bridge = null
+let bridgeError = null
+
+if (launchContext.type === 'max') {
+  try {
+    bridge = await loadMaxBridge()
+  } catch (error) {
+    bridgeError = error
+  }
+}
+
+const platform = createPlatform({
+  launchContext,
+  bridge,
+  bridgeError,
+  services: { downloadFile: existingDownloadService }
+})
+```
+
+`createPlatform()` selects one adapter from `launchContext.type`. A failed MAX
+Bridge produces a MAX fallback adapter; it preserves the same launch context
+and bridge error and never retries or switches adapters automatically.
+
+## Runtime identity
+
+```js
+this.$platform.launchContext
 this.$platform.bridgeType
 this.$platform.bridgeAvailable
 this.$platform.bridgeError
@@ -16,49 +70,71 @@ this.$platform.runtime.clientPlatform
 this.$platform.runtime.clientVersion
 ```
 
-`bridgeType` is one of:
+`launchContext.type` is always `'web'` or `'max'`. `bridgeType` describes the
+presence of a host bridge: `null` for Web and `'max'` for MAX, including the MAX
+fallback. `bridgeAvailable` independently reports whether the Bridge loaded.
 
-- `null` — regular Web browser.
-- `'max'` — MAX launch context was detected, whether or not its SDK loaded.
-- `'telegram'` — Telegram launch context was detected, whether or not its SDK loaded.
-
-`bridgeAvailable` reports whether the detected SDK loaded successfully. Do not
-use launch parameters or this property for authentication or authorization.
-
-`runtime.clientPlatform` and `runtime.clientVersion` describe values reported by
-the host SDK. The old `runtime.platform` and `runtime.version` remain as
-deprecated aliases. Web diagnostics, such as `navigator.userAgent`, are exposed
-separately under `runtime.browser.userAgent`.
+The runtime platform/version fields prefer values reported by the SDK and fall
+back to the sanitized launch metadata when the Bridge is unavailable.
 
 ## Links
 
-Use:
+Use `openExternalLink(url)` and `openPlatformLink(url)`. Both require absolute
+HTTPS URLs. MAX maps them to `WebApp.openLink(url)` and
+`WebApp.openMaxLink(url)` respectively. Web uses `window.open()`.
+
+The return value `{ status: 'requested' }` means the opening API was invoked;
+it does not guarantee that a popup was not blocked or that the user followed it.
+
+## Download service
+
+The adapters accept an optional application-owned service:
 
 ```js
-this.$platform.openExternalLink(url)
-this.$platform.openPlatformLink(url)
+createPlatform({
+  launchContext,
+  bridge,
+  services: {
+    downloadFile(url, fileName, options) {
+      return existingAxiosDownload(url, fileName, options)
+    }
+  }
+})
 ```
 
-Both methods require an absolute HTTPS URL. `openExternalLink()` requests opening
-a normal external URL. `openPlatformLink()` asks the current host to handle a
-platform-specific URL:
+The service receives the URL unchanged, including relative API URLs, plus the
+file name and optional third argument. It must return a Promise. Successful
+resolution becomes `{ status: 'requested' }`; a resolved
+`{ status: 'cancelled' }` remains cancelled. Synchronous exceptions and
+rejected Promises are propagated as rejections.
 
-| Adapter | Native method |
+The adapter does not know about Axios, interceptors, credentials, headers, or
+response shapes. If the existing service returns a Blob, wrap it in the
+consuming application so that the wrapper performs the download before it
+resolves. Axios is not a dependency of this module.
+
+Routing is:
+
+| Runtime | Download implementation |
 |---|---|
-| MAX | `WebApp.openMaxLink(url)` |
-| Telegram | `WebApp.openTelegramLink(url)` |
-| Web | `window.open(url, '_blank')` |
+| Web | Injected service, otherwise Fetch/Blob fallback |
+| MAX with native capability | `WebApp.downloadFile(url, fileName)` |
+| MAX without native capability | Injected service, otherwise Fetch/Blob fallback |
+| MAX fallback without Bridge | Injected service, otherwise Fetch/Blob fallback |
 
-When a native link method is unavailable, the adapters use a browser fallback.
-The returned `{ status: 'requested' }` means the opening API was invoked; it
-does not guarantee that a popup was not blocked or that the user followed it.
+The native MAX path accepts an absolute HTTPS URL only. The injected service is
+not subjected to that validation, so it can receive a relative API URL. The
+standalone Fetch/Blob fallback retains its HTTPS requirement and its own CORS
+and credentials behavior. The adapter never starts both download paths.
 
-This method is intentionally platform-relative. It does not mean that a MAX
-deep link will be opened natively from Telegram, or vice versa.
+Call the adapter's `downloadFile()` directly in the originating click handler
+when native MAX download is required. Prepare any authenticated or short-lived
+URL before the click; do not await an Axios request before calling the native
+method.
 
-## Capabilities
+## Capabilities and results
 
-All adapters expose the same keys:
+All adapters expose boolean capability keys:
 
 - `nativeDownload`
 - `backButton`
@@ -68,25 +144,11 @@ All adapters expose the same keys:
 - `shareUrl`
 - `sharePreparedMessage`
 
-The `native*` keys describe host SDK support. `shareUrl` describes effective
-availability, including supported Web Share or clipboard fallbacks.
-`sharePreparedMessage` is true only when the selected host provides the
-platform-specific prepared-message operation.
+The `native*` keys describe MAX Bridge support. `shareUrl` describes effective
+availability, including Web Share or clipboard fallback. `sharePreparedMessage`
+has no Web equivalent.
 
-## Operation results
-
-`downloadFile()` normalizes a native accepted/started request to
-`{ status: 'requested', platformStatus: 'downloading' }` or
-`{ status: 'requested', platformStatus: 'accepted' }`. A declined operation
-returns `{ status: 'cancelled', platformStatus: 'cancelled' }`.
-`requested` does not mean that the file has finished downloading.
-
-`shareUrl()` may return `shared`, `opened`, `copied`, `cancelled`, `requested`
-or reject. Telegram's `opened` means its composer-opening method was invoked,
-not that the user sent the content.
-
-`sharePreparedMessage()` uses platform-specific identifiers:
-MAX requires a Bot API message `mid` plus `chatType`; Telegram requires the
-PreparedInlineMessage ID returned by `savePreparedInlineMessage`.
-
-See [Platform Adapter Contract](platform-contract.md) for the full semantics.
+`downloadFile()` returns `requested` when a request was accepted/started, not
+when bytes have finished downloading. Native MAX may also return `cancelled`.
+`shareUrl()` returns `shared`, `cancelled`, or `copied` depending on the selected
+runtime and capability. Unsupported prepared-message sharing rejects.

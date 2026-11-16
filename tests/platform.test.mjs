@@ -1,309 +1,300 @@
-import { test } from 'node:test'
+import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { parseTelegramLaunchHash } from '../src/platform/detectTelegramLaunch.js'
-import detectPlatform from '../src/platform/detectPlatform.js'
+import { parseMaxLaunchHash } from '../src/platform/detectMaxLaunch.js'
+import detectLaunchContext from '../src/platform/detectLaunchContext.js'
 import createPlatform from '../src/platform/createPlatform.js'
 import createMaxAdapter from '../src/platform/maxAdapter.js'
-import createTelegramAdapter from '../src/platform/telegramAdapter.js'
 import createWebAdapter from '../src/platform/webAdapter.js'
-import createMaxFallbackAdapter from '../src/platform/maxFallbackAdapter.js'
-import createTelegramFallbackAdapter from '../src/platform/telegramFallbackAdapter.js'
 
-test('detects Telegram launch parameters without reading user data', () => {
-  const result = parseTelegramLaunchHash(
-    '#tgWebAppData=user%3Dfake&tgWebAppPlatform=ios&tgWebAppVersion=9.1'
-  )
+function replaceGlobal(name, value) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, name)
+  Object.defineProperty(globalThis, name, {
+    configurable: true,
+    writable: true,
+    value
+  })
+  return () => {
+    if (descriptor) Object.defineProperty(globalThis, name, descriptor)
+    else delete globalThis[name]
+  }
+}
 
-  assert.equal(result.isTelegramLaunch, true)
-  assert.equal(result.platform, 'ios')
-  assert.equal(result.version, '9.1')
-  assert.equal(Object.hasOwn(result, 'initData'), false)
-})
+const maxContext = {
+  type: 'max',
+  launch: { platform: 'android', version: '1.2.3' },
+  detection: { status: 'valid', reason: null }
+}
 
-test('does not classify ordinary hashes as Telegram', () => {
-  assert.equal(parseTelegramLaunchHash('#/orders/42').isTelegramLaunch, false)
-  assert.equal(parseTelegramLaunchHash('#tgWebAppStartParam=order').isTelegramLaunch, false)
-})
-
-test('detectPlatform detects Telegram, MAX and ordinary Web', () => {
-  const originalWindow = globalThis.window
+test('ordinary Web launch returns the complete absent Launch Context', () => {
+  const restore = replaceGlobal('window', {
+    location: { hash: '#/orders/42' },
+    WebApp: { platform: 'android' }
+  })
 
   try {
-    globalThis.window = { location: { hash: '#tgWebAppPlatform=android&tgWebAppVersion=9.1' } }
-    assert.equal(detectPlatform(), 'telegram')
-
-    globalThis.window = { location: { hash: '#WebAppPlatform=ios&WebAppVersion=1.2' } }
-    assert.equal(detectPlatform(), 'max')
-
-    globalThis.window = { location: { hash: '#/orders/42' } }
-    assert.equal(detectPlatform(), 'web')
+    assert.deepEqual(detectLaunchContext(), {
+      type: 'web',
+      launch: null,
+      detection: { status: 'absent', reason: null }
+    })
   } finally {
-    if (originalWindow === undefined) delete globalThis.window
-    else globalThis.window = originalWindow
+    restore()
   }
 })
 
-test('createPlatform selects Web, MAX, and Telegram from bridgeType', () => {
+test('valid MAX launch preserves platform/version but never exposes WebAppData', () => {
+  const parsed = parseMaxLaunchHash(
+    '#WebAppData=private%3Dlaunch-secret&WebAppPlatform=ios&WebAppVersion=2.4'
+  )
+
+  assert.deepEqual(parsed, {
+    launch: { platform: 'ios', version: '2.4' },
+    detection: { status: 'valid', reason: null }
+  })
+  assert.equal(JSON.stringify(parsed).includes('private'), false)
+  assert.equal(JSON.stringify(parsed).includes('launch-secret'), false)
+
+  const restore = replaceGlobal('window', {
+    location: {
+      hash: '#WebAppData=private&WebAppPlatform=android&WebAppVersion=3.0'
+    }
+  })
+  try {
+    assert.deepEqual(detectLaunchContext(), {
+      type: 'max',
+      launch: { platform: 'android', version: '3.0' },
+      detection: { status: 'valid', reason: null }
+    })
+  } finally {
+    restore()
+  }
+})
+
+test('MAX parser distinguishes absent, invalid, duplicate and conflicting markers', () => {
+  assert.equal(parseMaxLaunchHash('#/home').detection.status, 'absent')
+
+  const incomplete = parseMaxLaunchHash('#WebAppPlatform=ios')
+  assert.deepEqual(incomplete.detection, {
+    status: 'invalid',
+    reason: 'incomplete_launch_parameters'
+  })
+
+  const duplicate = parseMaxLaunchHash(
+    '#WebAppPlatform=ios&WebAppPlatform=ios&WebAppVersion=1.0'
+  )
+  assert.deepEqual(duplicate.detection, {
+    status: 'invalid',
+    reason: 'duplicate_parameter:WebAppPlatform'
+  })
+
+  const conflicting = parseMaxLaunchHash(
+    '#WebAppPlatform=ios&WebAppPlatform=android&WebAppVersion=1.0'
+  )
+  assert.deepEqual(conflicting.detection, {
+    status: 'conflicting',
+    reason: 'conflicting_parameter:WebAppPlatform'
+  })
+
+  assert.equal(
+    parseMaxLaunchHash('#WebAppPlatform=watch&WebAppVersion=1.0').detection.status,
+    'invalid'
+  )
+})
+
+test('invalid and conflicting launches fail closed to Web and retain diagnostics', () => {
+  const restore = replaceGlobal('window', {
+    location: { hash: '#WebAppPlatform=ios&WebAppPlatform=android&WebAppVersion=1.0' }
+  })
+
+  try {
+    const context = detectLaunchContext()
+    assert.equal(context.type, 'web')
+    assert.equal(context.launch, null)
+    assert.equal(context.detection.status, 'conflicting')
+  } finally {
+    restore()
+  }
+})
+
+test('createPlatform selects Web from Launch Context and preserves diagnostics', () => {
   const web = createPlatform()
   assert.equal(web.bridgeType, null)
   assert.equal(web.bridgeAvailable, false)
+  assert.equal(web.launchContext.type, 'web')
 
-  const maxBridge = {
-    platform: 'android',
-    version: '1.2',
-    openMaxLink() {}
-  }
-  const max = createPlatform({ bridgeType: 'max', bridge: maxBridge })
+  const invalidWeb = createPlatform({
+    launchContext: {
+      type: 'web',
+      launch: null,
+      detection: { status: 'invalid', reason: 'duplicate_parameter:WebAppVersion' }
+    }
+  })
+  assert.equal(invalidWeb.launchContext.detection.status, 'invalid')
+})
+
+test('createPlatform selects MAX adapter from Launch Context', () => {
+  const bridge = { platform: 'android', version: '1.2.3' }
+  const max = createPlatform({ launchContext: maxContext, bridge })
+
   assert.equal(max.bridgeType, 'max')
   assert.equal(max.bridgeAvailable, true)
-  assert.equal(Object.hasOwn(max, 'isMax'), false)
-  assert.equal(Object.hasOwn(max, 'isTelegram'), false)
-
-  const telegramBridge = { platform: 'ios', version: '9.1' }
-  const telegram = createPlatform({ bridgeType: 'telegram', bridge: telegramBridge })
-  assert.equal(telegram.bridgeType, 'telegram')
-  assert.equal(telegram.bridgeAvailable, true)
-  assert.equal(Object.hasOwn(telegram, 'isTelegram'), false)
+  assert.equal(max.launchContext, maxContext)
+  assert.equal(max.runtime.clientPlatform, 'android')
+  assert.equal(max.runtime.clientVersion, '1.2.3')
 })
 
-test('fallback adapters preserve bridgeType but report bridgeAvailable false', () => {
-  const maxFallback = createPlatform({
-    bridgeType: 'max',
-    error: new Error('MAX CDN unavailable')
-  })
-  const telegramFallback = createPlatform({
-    bridgeType: 'telegram',
-    error: new Error('Telegram CDN unavailable')
-  })
-
-  assert.equal(maxFallback.bridgeType, 'max')
-  assert.equal(maxFallback.bridgeAvailable, false)
-  assert.equal(telegramFallback.bridgeType, 'telegram')
-  assert.equal(telegramFallback.bridgeAvailable, false)
-  assert.equal(maxFallback.capabilities.backButton, false)
-  assert.equal(telegramFallback.capabilities.nativePlatformLinks, false)
-})
-
-test('all adapters expose the same common public method and capability shape', () => {
-  const max = createMaxAdapter({
-    platform: 'ios',
-    version: '1.0',
-    BackButton: {}
-  })
-  const telegram = createTelegramAdapter({
-    platform: 'ios',
-    version: '9.1',
-    BackButton: {}
-  })
-  const web = createWebAdapter()
-  const maxFallback = createMaxFallbackAdapter(new Error('offline'))
-  const telegramFallback = createTelegramFallbackAdapter(new Error('offline'))
-
-  const methodNames = [
-    'downloadFile',
-    'openExternalLink',
-    'openPlatformLink',
-    'shareUrl',
-    'sharePreparedMessage',
-    'enableClosingConfirmation',
-    'disableClosingConfirmation',
-    'ready'
-  ]
-  const capabilityNames = [
-    'nativeDownload',
-    'backButton',
-    'nativeExternalLinks',
-    'nativePlatformLinks',
-    'closingConfirmation',
-    'shareUrl',
-    'sharePreparedMessage'
-  ]
-
-  for (const adapter of [max, telegram, web, maxFallback, telegramFallback]) {
-    for (const name of methodNames) {
-      assert.equal(typeof adapter[name], 'function', `${name} must exist`)
-    }
-    for (const name of capabilityNames) {
-      assert.equal(typeof adapter.capabilities[name], 'boolean', `${name} must be boolean`)
-    }
-    assert.equal(typeof adapter.backButton.show, 'function')
-    assert.equal(typeof adapter.backButton.hide, 'function')
-    assert.equal(typeof adapter.backButton.onClick, 'function')
-    assert.equal(Object.hasOwn(adapter, 'isMax'), false)
-    assert.equal(Object.hasOwn(adapter, 'isTelegram'), false)
-    assert.equal(Object.hasOwn(adapter, 'environment'), false)
-  }
-})
-
-test('openPlatformLink delegates to the correct native platform method', () => {
-  let maxOpened
-  let telegramOpened
-
-  const max = createMaxAdapter({
-    openMaxLink(url) { maxOpened = url }
-  })
-  const telegram = createTelegramAdapter({
-    version: '9.1',
-    openTelegramLink(url) { telegramOpened = url }
-  })
-
-  max.openPlatformLink('https://max.ru/example')
-  telegram.openPlatformLink('https://t.me/example')
-
-  assert.equal(maxOpened, 'https://max.ru/example')
-  assert.equal(telegramOpened, 'https://t.me/example')
-  assert.equal(max.capabilities.nativePlatformLinks, true)
-  assert.equal(telegram.capabilities.nativePlatformLinks, true)
-  assert.equal('openMaxLink' in max, false)
-  assert.equal('openTelegramLink' in telegram, false)
-})
-
-test('BackButton helper normalizes subscription and makes unsubscribe idempotent', () => {
-  let handler
-  let removed = 0
-  const adapter = createMaxAdapter({
-    BackButton: {
-      show() {},
-      hide() {},
-      onClick(callback) { handler = callback },
-      offClick(callback) {
-        assert.equal(callback, handler)
-        removed += 1
+test('MAX fallback retains Launch Context and Bridge error', async () => {
+  const bridgeError = new Error('MAX CDN unavailable')
+  const calls = []
+  const fallback = createPlatform({
+    launchContext: maxContext,
+    bridgeError,
+    services: {
+      downloadFile(url, fileName, options) {
+        calls.push({ url, fileName, options })
+        return Promise.resolve(undefined)
       }
     }
   })
 
-  let called = 0
-  const unsubscribe = adapter.backButton.onClick(() => { called += 1 })
-  handler()
-  unsubscribe()
-  unsubscribe()
+  assert.equal(fallback.bridgeType, 'max')
+  assert.equal(fallback.bridgeAvailable, false)
+  assert.equal(fallback.bridgeError, bridgeError)
+  assert.equal(fallback.launchContext, maxContext)
+  assert.equal(fallback.runtime.clientPlatform, 'android')
+  assert.equal(fallback.runtime.clientVersion, '1.2.3')
+  assert.equal(fallback.capabilities.backButton, false)
+  assert.equal(fallback.capabilities.nativeDownload, false)
 
-  assert.equal(called, 1)
-  assert.equal(removed, 1)
-  assert.equal(adapter.capabilities.backButton, true)
-})
-
-test('closing confirmation helper exposes the same API for MAX and Telegram', () => {
-  const maxCalls = []
-  const telegramCalls = []
-
-  const max = createMaxAdapter({
-    enableClosingConfirmation() { maxCalls.push('enable') },
-    disableClosingConfirmation() { maxCalls.push('disable') }
-  })
-  const telegram = createTelegramAdapter({
-    version: '9.1',
-    enableClosingConfirmation() { telegramCalls.push('enable') },
-    disableClosingConfirmation() { telegramCalls.push('disable') }
-  })
-
-  max.enableClosingConfirmation()
-  max.disableClosingConfirmation()
-  telegram.enableClosingConfirmation()
-  telegram.disableClosingConfirmation()
-
-  assert.deepEqual(maxCalls, ['enable', 'disable'])
-  assert.deepEqual(telegramCalls, ['enable', 'disable'])
-  assert.equal(max.capabilities.closingConfirmation, true)
-  assert.equal(telegram.capabilities.closingConfirmation, true)
-})
-
-test('Telegram downloadFile uses Telegram parameter names and normalizes callback', async () => {
-  let receivedParams
-  const telegram = createTelegramAdapter({
-    platform: 'android',
-    version: '9.1',
-    downloadFile(params, callback) {
-      receivedParams = params
-      callback(true)
-    }
-  })
-
-  const result = await telegram.downloadFile('https://files.example.com/a.pdf', 'a.pdf')
-
-  assert.deepEqual(receivedParams, {
-    url: 'https://files.example.com/a.pdf',
-    file_name: 'a.pdf'
-  })
-  assert.deepEqual(result, { status: 'requested', platformStatus: 'accepted' })
-})
-
-test('Telegram Bot API 8.0 media methods are disabled on older clients', async () => {
-  const telegram = createTelegramAdapter({
-    platform: 'ios',
-    version: '7.10',
-    downloadFile() {},
-    shareMessage() {}
-  })
-
-  assert.equal(telegram.capabilities.nativeDownload, false)
-  assert.equal(telegram.capabilities.sharePreparedMessage, false)
-  await assert.rejects(
-    telegram.sharePreparedMessage({ messageId: 'prepared-id' }),
-    /not available in this client version/
+  assert.deepEqual(
+    await fallback.downloadFile('/api/files/1', 'invoice.pdf'),
+    { status: 'requested' }
   )
+  assert.equal(calls[0].url, '/api/files/1')
 })
 
-test('Telegram prepared-message sharing uses shareMessage callback', async () => {
-  let receivedId
-  const telegram = createTelegramAdapter({
-    platform: 'ios',
-    version: '9.1',
-    shareMessage(messageId, callback) {
-      receivedId = messageId
-      callback(true)
+test('Web adapter passes relative URLs and options unchanged to injected service', async () => {
+  const received = []
+  const service = (url, fileName, options) => {
+    received.push({ url, fileName, options })
+    return Promise.resolve({ data: 'service-result' })
+  }
+  const web = createWebAdapter({
+    downloadOptions: { credentials: 'include', tenant: 'default' },
+    services: { downloadFile: service }
+  })
+
+  const pending = web.downloadFile('/api/documents/42', 'document.pdf', {
+    tenant: 'override'
+  })
+  assert.equal(received.length, 1, 'service is invoked synchronously')
+  assert.deepEqual(received[0], {
+    url: '/api/documents/42',
+    fileName: 'document.pdf',
+    options: { credentials: 'include', tenant: 'override' }
+  })
+  assert.deepEqual(await pending, { status: 'requested' })
+})
+
+test('MAX native download is invoked synchronously in the originating call', async () => {
+  let inUserGesture = true
+  let nativeCalls = 0
+  const max = createMaxAdapter({
+    platform: 'android',
+    downloadFile(url, fileName) {
+      assert.equal(inUserGesture, true)
+      assert.equal(url, 'https://files.example.test/file.pdf')
+      assert.equal(fileName, 'file.pdf')
+      nativeCalls += 1
+      return Promise.resolve({ status: 'downloading' })
     }
   })
 
-  const result = await telegram.sharePreparedMessage({
-    messageId: 'prepared-inline-message-id'
+  const pending = max.downloadFile('https://files.example.test/file.pdf', 'file.pdf')
+  assert.equal(nativeCalls, 1)
+  inUserGesture = false
+  assert.deepEqual(await pending, {
+    status: 'requested',
+    platformStatus: 'downloading'
   })
-
-  assert.equal(receivedId, 'prepared-inline-message-id')
-  assert.deepEqual(result, { status: 'shared' })
 })
 
-test('Telegram URL sharing opens the official share URL', async () => {
-  let openedUrl
-  const telegram = createTelegramAdapter({
+test('MAX without native download delegates to injected service, not Blob fallback', async () => {
+  let nativeCalls = 0
+  const calls = []
+  const max = createMaxAdapter({
     platform: 'web',
-    version: '9.1',
-    openTelegramLink(url) { openedUrl = url }
-  })
-
-  const result = await telegram.shareUrl(
-    'https://files.example.com/doc.pdf',
-    'My document'
-  )
-
-  const parsed = new URL(openedUrl)
-  assert.equal(parsed.origin + parsed.pathname, 'https://t.me/share/url')
-  assert.equal(parsed.searchParams.get('url'), 'https://files.example.com/doc.pdf')
-  assert.equal(parsed.searchParams.get('text'), 'My document')
-  assert.deepEqual(result, { status: 'opened' })
-})
-
-test('MAX prepared-message sharing keeps MAX mid and chatType semantics', async () => {
-  let receivedParams
-  const max = createMaxAdapter({
-    platform: 'android',
-    version: '1.2',
-    shareMaxContent(params) {
-      receivedParams = params
-      return Promise.resolve({ status: 'shared' })
+    downloadFile() { nativeCalls += 1 }
+  }, {
+    services: {
+      downloadFile(url, fileName) {
+        calls.push([url, fileName])
+        return Promise.resolve()
+      }
     }
   })
 
-  const result = await max.sharePreparedMessage({
-    messageId: 'mid.from.max.bot.api',
-    chatType: 'DIALOG'
+  assert.equal(max.capabilities.nativeDownload, false)
+  assert.deepEqual(
+    await max.downloadFile('/api/export/4', 'export.csv'),
+    { status: 'requested' }
+  )
+  assert.deepEqual(calls, [['/api/export/4', 'export.csv']])
+  assert.equal(nativeCalls, 0)
+})
+
+test('native MAX download rejects non-HTTPS URLs before calling the Bridge', async () => {
+  let nativeCalls = 0
+  const max = createMaxAdapter({
+    platform: 'ios',
+    downloadFile() { nativeCalls += 1 }
   })
 
-  assert.deepEqual(receivedParams, {
-    mid: 'mid.from.max.bot.api',
-    chatType: 'DIALOG'
+  await assert.rejects(
+    max.downloadFile('/api/file.pdf', 'file.pdf'),
+    /absolute URL|HTTPS/
+  )
+  assert.equal(nativeCalls, 0)
+})
+
+test('download service synchronous exceptions and rejected Promises propagate', async () => {
+  const syncError = new Error('sync service error')
+  const rejectingError = new Error('async service error')
+  const sync = createWebAdapter({
+    services: { downloadFile() { throw syncError } }
   })
-  assert.deepEqual(result, { status: 'shared' })
+  const async = createWebAdapter({
+    services: { downloadFile() { return Promise.reject(rejectingError) } }
+  })
+
+  await assert.rejects(sync.downloadFile('/api/a', 'a.pdf'), error => error === syncError)
+  await assert.rejects(async.downloadFile('/api/b', 'b.pdf'), error => error === rejectingError)
+})
+
+test('download service can explicitly return a cancelled result', async () => {
+  const web = createWebAdapter({
+    services: { downloadFile: async () => ({ status: 'cancelled', internal: true }) }
+  })
+  assert.deepEqual(await web.downloadFile('/api/a', 'a.pdf'), { status: 'cancelled' })
+})
+
+test('download service rejects unknown resolved statuses', async () => {
+  const web = createWebAdapter({
+    services: { downloadFile: async () => ({ status: 'completed' }) }
+  })
+  await assert.rejects(web.downloadFile('/api/a', 'a.pdf'), /Unexpected download service result/)
+})
+
+test('factory validates service, Launch Context and migration contract', () => {
+  assert.throws(() => createPlatform({ services: { downloadFile: true } }), /must be a function/)
+  assert.throws(() => createPlatform({ bridgeType: 'max' }), /launchContext and bridgeError/)
+  assert.throws(() => createPlatform({ launchContext: { type: 'other' } }), /web.*max/)
+  assert.throws(() => createPlatform({
+    launchContext: {
+      type: 'max',
+      launch: { platform: 'android', version: '1.0' },
+      detection: { status: 'invalid', reason: 'duplicate' }
+    }
+  }), /valid launch metadata/)
 })

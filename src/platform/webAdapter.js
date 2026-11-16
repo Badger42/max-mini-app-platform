@@ -1,11 +1,17 @@
 import downloadBlob from './downloadBlob.js'
+import { WEB_LAUNCH_CONTEXT } from './detectLaunchContext.js'
 import {
-  requireHttpsUrl,
+  invokeDownloadService,
   openInBrowser,
+  requireHttpsUrl,
   unavailable
 } from './adapterUtils.js'
 
-export default function createWebAdapter({ downloadOptions = {} } = {}) {
+export default function createWebAdapter({
+  downloadOptions = {},
+  services = {},
+  launchContext = WEB_LAUNCH_CONTEXT
+} = {}) {
   const hasWebShare = (
     typeof navigator !== 'undefined' &&
     typeof navigator.share === 'function'
@@ -20,6 +26,7 @@ export default function createWebAdapter({ downloadOptions = {} } = {}) {
     bridgeType: null,
     bridgeAvailable: false,
     bridgeError: null,
+    launchContext,
 
     runtime: {
       clientPlatform: null,
@@ -28,7 +35,6 @@ export default function createWebAdapter({ downloadOptions = {} } = {}) {
       browser: {
         userAgent: typeof navigator !== 'undefined' ? navigator.userAgent || null : null
       },
-      // Backward-compatible aliases. Prefer clientPlatform/clientVersion.
       platform: null,
       version: null
     },
@@ -44,11 +50,13 @@ export default function createWebAdapter({ downloadOptions = {} } = {}) {
     },
 
     downloadFile(url, fileName, options = {}) {
-      const validUrl = requireHttpsUrl(url, 'downloadFile')
-      return downloadBlob(validUrl, fileName, {
-        ...downloadOptions,
-        ...options
-      })
+      return invokeDownloadService(
+        services.downloadFile,
+        url,
+        fileName,
+        { ...downloadOptions, ...options },
+        downloadBlob
+      )
     },
 
     openExternalLink(url) {
@@ -56,7 +64,6 @@ export default function createWebAdapter({ downloadOptions = {} } = {}) {
     },
 
     openPlatformLink(url) {
-      // A regular browser has no host-specific deep-link API.
       return openInBrowser(requireHttpsUrl(url, 'openPlatformLink'))
     },
 
@@ -91,9 +98,7 @@ export default function createWebAdapter({ downloadOptions = {} } = {}) {
       supported: false,
       show() {},
       hide() {},
-      onClick() {
-        return () => {}
-      }
+      onClick() { return () => {} }
     },
 
     enableClosingConfirmation() {},

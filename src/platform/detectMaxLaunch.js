@@ -2,43 +2,74 @@ const MAX_PLATFORMS = new Set(['ios', 'android', 'desktop', 'web'])
 const MAX_LAUNCH_KEYS = ['WebAppData', 'WebAppPlatform', 'WebAppVersion']
 
 /**
- * Parse MAX launch parameters from the URL fragment.
+ * Parse MAX launch markers without retaining WebAppData.
  *
- * Duplicate protocol parameters are rejected rather than silently trusting the
- * first value. This is environment detection only, never authentication.
+ * This is environment detection only. Launch data is never exposed to the
+ * adapter, treated as identity, or used for authorization.
  */
 export function parseMaxLaunchHash(hash) {
-  const fragment = String(hash || '').replace(/^#/, '')
+  const fragment = String(hash ?? '').replace(/^#/, '')
   const params = new URLSearchParams(fragment)
-  const hasDuplicates = MAX_LAUNCH_KEYS.some(key => params.getAll(key).length > 1)
+  const presentKeys = MAX_LAUNCH_KEYS.filter(key => params.has(key))
 
-  const getUniqueValue = key => {
-    const values = params.getAll(key)
-    return values.length === 1 ? values[0] : null
+  if (presentKeys.length === 0) {
+    return {
+      launch: null,
+      detection: { status: 'absent', reason: null }
+    }
   }
 
-  const platformValue = getUniqueValue('WebAppPlatform')
-  const version = getUniqueValue('WebAppVersion')
-  const webAppData = getUniqueValue('WebAppData')
-  const platform = MAX_PLATFORMS.has(platformValue) ? platformValue : null
+  for (const key of presentKeys) {
+    const values = params.getAll(key).map(value => value.trim())
 
-  const isMaxLaunch = !hasDuplicates && Boolean(
-    webAppData || (platform && version)
-  )
+    if (values.length > 1) {
+      const hasConflictingValues = new Set(values).size > 1
+      return {
+        launch: null,
+        detection: {
+          status: hasConflictingValues ? 'conflicting' : 'invalid',
+          reason: `${hasConflictingValues ? 'conflicting' : 'duplicate'}_parameter:${key}`
+        }
+      }
+    }
+  }
+
+  const hasData = Boolean((params.get('WebAppData') || '').trim())
+  const platformValue = params.has('WebAppPlatform')
+    ? params.get('WebAppPlatform').trim()
+    : null
+  const versionValue = params.has('WebAppVersion')
+    ? params.get('WebAppVersion').trim()
+    : null
+
+  if (platformValue !== null && !MAX_PLATFORMS.has(platformValue)) {
+    return {
+      launch: null,
+      detection: { status: 'invalid', reason: 'unsupported_platform' }
+    }
+  }
+
+  if (versionValue !== null && !versionValue) {
+    return {
+      launch: null,
+      detection: { status: 'invalid', reason: 'empty_parameter:WebAppVersion' }
+    }
+  }
+
+  // MAX launch data may be omitted by some entry points, but in that case the
+  // platform and version markers must both be present and valid.
+  if (!hasData && !(platformValue && versionValue)) {
+    return {
+      launch: null,
+      detection: { status: 'invalid', reason: 'incomplete_launch_parameters' }
+    }
+  }
 
   return {
-    isMaxLaunch,
-    platform,
-    version: version || null,
-    invalid: hasDuplicates
+    launch: {
+      platform: platformValue,
+      version: versionValue
+    },
+    detection: { status: 'valid', reason: null }
   }
-}
-
-export default function detectMaxLaunch() {
-  if (typeof window === 'undefined' || !window.location) {
-    return false
-  }
-
-  // SDK globals are not proof of host context: another script may have loaded it.
-  return parseMaxLaunchHash(window.location.hash).isMaxLaunch
 }

@@ -1,76 +1,109 @@
 # Platform Adapter Contract
 
-This document defines the public contract shared by Web, MAX, Telegram and
-fallback adapters. The project remains plain JavaScript; `platformTypes.js`
-provides JSDoc types without introducing a TypeScript build step.
+This document defines the shared contract for Web, MAX and the MAX fallback.
+The package remains plain JavaScript; `platformTypes.js` provides JSDoc types.
 
-## Runtime identity
+## Launch Context
 
-- `bridgeType`: `null` for Web, `'max'`` or `'telegram'` for a recognized host.
-- `bridgeAvailable`: whether that host's SDK loaded successfully.
-- `bridgeError`: the SDK loading failure, if any.
-- `runtime.clientPlatform` and `runtime.clientVersion`: values reported by the
-  host SDK, or `null` when unavailable.
-- `runtime.deviceName`: a host-reported device name, never an inferred
-  User-Agent string.
+The detector, bootstrap, factory and adapters use the same shape:
 
-`runtime.platform` and `runtime.version` remain as backward-compatible aliases
-for `clientPlatform` and `clientVersion`. New code should use the longer names.
+```js
+{
+  type: 'max', // 'web' | 'max'
+  launch: {
+    platform: 'android', // 'ios' | 'android' | 'desktop' | 'web' | null
+    version: '1.0', // string | null
+  },
+  detection: {
+    status: 'valid', // 'valid' | 'absent' | 'invalid' | 'conflicting'
+    reason: null, // string | null; stable diagnostic code
+  },
+}
+```
 
-Launch parameters are used only to select which SDK to load. They are not proof
-of identity, must not authorize access, and must not replace backend validation.
+For ordinary Web, `launch` is `null` and detection is `absent`. Invalid and
+conflicting MAX-like parameters fail closed to `type: 'web'`, `launch: null`;
+the diagnostic status and reason remain available. A duplicate parameter with
+the same value is invalid. Repeated values that disagree are conflicting.
+
+The MAX parser uses `WebAppData` only as a presence marker and never returns,
+stores, logs or forwards its value. Launch parameters are only a runtime
+selection hint. They must not be used for authentication, identity, or access
+control. User-Agent is not used to detect MAX.
+
+## Adapter identity
+
+- `launchContext.type`: `'web'` or `'max'`.
+- `bridgeType`: `null` for Web and `'max'` for MAX, including the fallback.
+- `bridgeAvailable`: whether MAX Bridge loaded successfully.
+- `bridgeError`: the Bridge load failure, or `null` when not applicable.
+- `launchContext`: the original sanitized object passed through bootstrap and
+  the factory, including in MAX fallback.
+
+`runtime.clientPlatform` and `runtime.clientVersion` prefer SDK-reported values
+and fall back to the launch metadata if Bridge loading failed. Browser
+User-Agent remains Web diagnostic data and is not used for environment
+selection.
 
 ## Capabilities
 
-The capability keys are stable across all adapters:
-
 | Capability | Meaning |
 |---|---|
-| `nativeDownload` | The selected host SDK exposes its native download method |
+| `nativeDownload` | MAX Bridge exposes native download and the host platform is not `web` |
 | `backButton` | The complete native BackButton API is available |
-| `nativeExternalLinks` | The host SDK exposes `openLink` |
-| `nativePlatformLinks` | The host SDK exposes its platform-specific link method |
-| `closingConfirmation` | The host SDK exposes both confirmation methods |
-| `shareUrl` | URL sharing is available through the native or supported browser mechanism |
-| `sharePreparedMessage` | The selected host SDK supports prepared-message sharing |
+| `nativeExternalLinks` | MAX Bridge exposes `openLink` |
+| `nativePlatformLinks` | MAX Bridge exposes `openMaxLink` |
+| `closingConfirmation` | Both close-confirmation methods are available |
+| `shareUrl` | URL sharing works through MAX or a supported browser mechanism |
+| `sharePreparedMessage` | MAX Bridge supports prepared-message sharing |
 
-The `native*` keys describe native host support. `shareUrl` describes effective
-public availability, including browser share/clipboard fallback. Prepared
-message sharing has no generic Web equivalent.
+The MAX fallback retains Web operations and injected services but advertises
+all native capabilities as unsupported. Its BackButton methods remain safe
+no-ops, and it never attempts to access `window.WebApp`, reload the SDK, or
+switch adapters during the current page lifecycle.
 
-All adapters expose the same methods. If a native feature is not available, the
-adapter uses a documented browser fallback where one exists; otherwise the
-method rejects with an explanatory error or is a safe no-op for UI controls.
+## Download service port
+
+`createPlatform({ services: { downloadFile } })` accepts an optional function
+with the contract:
+
+```js
+(downloadUrl, fileName, options) => Promise<unknown>
+```
+
+It receives the original URL without URL rewriting. This is intentional:
+application services may accept relative API endpoints and own Axios
+interceptors, credentials, headers, Blob handling and error translation.
+The service must resolve only after its download workflow has completed. If it
+returns a Blob rather than performing the download, the consuming application
+must wrap it and save the Blob before resolving.
+
+The adapter normalizes a fulfilled service call to `{ status: 'requested' }`;
+a service result `{ status: 'cancelled' }` remains cancelled. A thrown
+exception or rejected Promise reaches the caller as a rejection.
+
+Selection order:
+
+1. Web: injected service, else the standalone Fetch/Blob helper.
+2. MAX with native capability: native `WebApp.downloadFile()` only.
+3. MAX without native capability: injected service, else Fetch/Blob.
+4. MAX fallback: injected service, else Fetch/Blob.
+
+Native MAX requires an absolute HTTPS URL and is invoked synchronously from the
+adapter method, before any Promise continuation, to preserve the user gesture.
+The injected service is not forced to use HTTPS or absolute URLs. The built-in
+Fetch/Blob helper retains its own HTTPS, CORS and credentials requirements.
+Native and browser download paths are mutually exclusive.
 
 ## Operation results
 
-- Link-opening methods return `{ status: 'requested' }` when the opening API
-  was invoked. This does not prove that a popup was not blocked or that the user
-  followed the link.
-- `downloadFile()` returns `{ status: 'requested' }` when the platform accepted
-  or initiated the request, or `{ status: 'cancelled' }` when the user declined.
-  Native source information may be preserved in `platformStatus`. This is not
-  a download-completion event.
-- `shareUrl()` may return `shared`, `opened`, `copied`, `cancelled`,
-  `requested`, or reject. `opened` means the Telegram composer API was invoked,
-  not that the user sent the content.
-- `sharePreparedMessage()` returns `shared` or `cancelled` when the host
-  provides a result. The identifiers and payloads remain platform-specific.
+- Link-opening methods return `{ status: 'requested' }` when an opening API was
+  invoked; they do not prove that the user followed the link.
+- Native MAX `downloadFile()` returns `requested` for `downloading` and
+  `cancelled` for `cancelled`. `requested` is not a completion event.
+- Injected download-service success returns `{ status: 'requested' }` unless
+  the service explicitly resolves to `{ status: 'cancelled' }`.
+- `shareUrl()` returns `shared`, `cancelled`, or `copied`, or rejects.
+- Unsupported prepared-message sharing rejects.
 
-Do not treat `requested`, `opened`, or `accepted` as proof of completed work.
-All asynchronous failures are propagated as rejected promises.
-
-## URL requirements
-
-Public URL operations accept absolute HTTPS URLs only. URLs with embedded
-username/password credentials are rejected. This keeps URL behavior consistent
-between native adapters and browser fallbacks.
-
-## SDK loading
-
-`loadBridgeScript()` owns the shared script-injection mechanics. MAX and
-Telegram keep separate wrappers for their CDN URL and global bridge lookup.
-A timeout or load error rejects the current attempt and removes it from the
-in-flight map so a later explicit call can retry. A late load event cannot
-resolve a previously rejected promise or replace an adapter already selected
-by the bootstrap.
+All asynchronous errors are propagated as rejected Promises.

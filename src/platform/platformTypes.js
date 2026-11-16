@@ -1,10 +1,25 @@
 /**
- * @typedef {'max'|'telegram'|null} BridgeType
+ * @typedef {'web'|'max'} PlatformType
+ * @typedef {null|'max'} BridgeType
+ * @typedef {'valid'|'absent'|'invalid'|'conflicting'} LaunchDetectionStatus
+ * @typedef {'requested'|'cancelled'|'shared'|'copied'|'unavailable'} OperationStatus
+ */
+
+/** @typedef {{ platform: ('ios'|'android'|'desktop'|'web'|null), version: (string|null) }} LaunchMetadata */
+
+/**
+ * Sanitized environment information. Raw WebAppData is deliberately excluded.
+ * A malformed MAX launch fails closed to type='web' with a diagnostic status.
+ *
+ * @typedef {Object} LaunchContext
+ * @property {PlatformType} type
+ * @property {LaunchMetadata|null} launch
+ * @property {{status: LaunchDetectionStatus, reason: (string|null)}} detection
  */
 
 /**
- * `shareUrl` describes the effective public operation (native or browser
- * fallback). The `native*` fields describe host-SDK support only.
+ * `shareUrl` describes effective public availability (native or browser
+ * fallback); the `native*` fields describe MAX SDK support only.
  *
  * @typedef {Object} PlatformCapabilities
  * @property {boolean} nativeDownload
@@ -17,28 +32,30 @@
  */
 
 /**
- * @typedef {'requested'|'cancelled'|'shared'|'opened'|'copied'|'unavailable'} OperationStatus
- */
-
-/**
  * @typedef {Object} PlatformOperationResult
  * @property {OperationStatus} status
- * @property {string} [platformStatus] Original platform status when normalized.
+ * @property {string} [platformStatus] Original MAX status when normalized.
  */
 
 /**
  * @typedef {Object} PlatformRuntime
- * @property {string|null} clientPlatform Host-reported client platform.
- * @property {string|null} clientVersion Host-reported SDK/client version.
+ * @property {string|null} clientPlatform Host-reported or launch-reported client platform.
+ * @property {string|null} clientVersion Host-reported or launch-reported version.
  * @property {string|null} deviceName Host-reported device name, if available.
  * @property {{userAgent: string|null}} [browser] Browser diagnostic data.
  */
 
 /**
+ * @typedef {Object} PlatformServices
+ * @property {(url: string, fileName: string, options?: object) => Promise<unknown>} [downloadFile]
+ */
+
+/**
  * @typedef {Object} PlatformAdapter
- * @property {BridgeType} bridgeType
+ * @property {BridgeType} bridgeType null for Web, 'max' for MAX.
  * @property {boolean} bridgeAvailable
  * @property {Error|null} bridgeError
+ * @property {LaunchContext} launchContext
  * @property {PlatformRuntime} runtime
  * @property {PlatformCapabilities} capabilities
  * @property {(url: string, fileName: string, options?: object) => Promise<PlatformOperationResult>} downloadFile
@@ -51,4 +68,5 @@
  * @property {() => void|Promise<void>} disableClosingConfirmation
  * @property {() => void|Promise<void>} ready
  */
+
 export {}

@@ -1,0 +1,7 @@
+src/platform/createFallbackAdapter.js
+src/platform/detectPlatform.js
+src/platform/detectTelegramLaunch.js
+src/platform/loadTelegramBridge.js
+src/platform/telegramAdapter.js
+src/platform/telegramFallbackAdapter.js
+docs/telegram-integration.md
