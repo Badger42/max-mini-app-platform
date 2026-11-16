@@ -5,10 +5,10 @@ const TELEGRAM_LAUNCH_KEYS = [
 ]
 
 /**
- * Parse legacy Telegram launch parameters from the URL fragment.
+ * Parse Telegram launch parameters from the URL fragment.
  * This is a script-loading hint, never an authentication result.
  * @param {string|null|undefined} hash
- * @returns {{isTelegramLaunch: boolean, platform: string|null, version: string|null, invalid: boolean}}
+ * @returns {import('./platformTypes.js').TelegramLaunchParseResult}
  */
 export function parseTelegramLaunchHash(hash) {
   const fragment = String(hash || '').replace(/^#/, '')

@@ -134,7 +134,7 @@ export function normalizeMaxDownloadResult(result) {
 }
 
 /**
- * Legacy Telegram's callback result is normalized independently from MAX.
+ * Telegram's callback result is normalized independently from MAX.
  * @param {unknown} result
  * @returns {import('./platformTypes.js').DownloadResult}
  */
@@ -154,7 +154,7 @@ export function normalizeTelegramDownloadResult(result) {
 /**
  * MAX shareMaxContent() documents only `shared` and `cancelled` outcomes.
  * @param {unknown} result
- * @returns {import('./platformTypes.js').ShareUrlResult}
+ * @returns {import('./platformTypes.js').MaxShareUrlResult}
  */
 export function normalizeMaxShareResult(result) {
   const platformStatus = readPlatformStatus(result)
@@ -170,7 +170,7 @@ export function normalizeMaxShareResult(result) {
  * Prepared-message sharing has its own public result type even though MAX uses
  * the same SDK method and currently documents the same two platform statuses.
  * @param {unknown} result
- * @returns {import('./platformTypes.js').PreparedMessageResult}
+ * @returns {import('./platformTypes.js').MaxPreparedMessageResult}
  */
 export function normalizeMaxPreparedMessageResult(result) {
   const platformStatus = readPlatformStatus(result)
@@ -182,7 +182,7 @@ export function normalizeMaxPreparedMessageResult(result) {
 
 /**
  * Normalizes the structurally identical BackButton APIs used by MAX and the
- * legacy Telegram adapter. The returned unsubscribe function is idempotent.
+ * Telegram adapter. The returned unsubscribe function is idempotent.
  * @param {import('./platformTypes.js').NativeBackButton|undefined} nativeBackButton
  * @returns {import('./platformTypes.js').BackButtonService}
  */

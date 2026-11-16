@@ -5,7 +5,7 @@ const BRIDGE_SCRIPT_ID = 'telegram-web-app-bridge'
 const DEFAULT_TIMEOUT_MS = 5000
 
 /**
- * Legacy Telegram SDK loader retained for the preceding migration stage.
+ * Telegram SDK loader retained for the preceding migration stage.
  * @param {{timeoutMs?: number}} [options]
  * @returns {Promise<import('./platformTypes.js').TelegramBridge>}
  */

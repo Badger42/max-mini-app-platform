@@ -3,7 +3,7 @@ import detectTelegramLaunch from './detectTelegramLaunch.js'
 
 /**
  * Detect the launch environment before Vue Router is created or mounted.
- * Telegram remains a legacy compatibility route until the previous stage is
+ * Telegram remains a supported platform route until the previous stage is
  * completed; the target platform model is Web + MAX.
  * @returns {import('./platformTypes.js').LaunchContext}
  */

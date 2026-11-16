@@ -2,7 +2,7 @@ import createWebAdapter from './webAdapter.js'
 
 /**
  * Shared implementation for a recognized host whose SDK failed to load.
- * The Telegram branch is retained only until the preceding migration stage.
+ * The Telegram branch is kept as a first-class platform.
  *
  * @param {'max'|'telegram'} bridgeType
  * @param {Error|string|null} error

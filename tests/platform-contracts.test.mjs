@@ -40,7 +40,7 @@ test('MAX download normalizer accepts only MAX documented statuses', () => {
   }
 })
 
-test('legacy Telegram download statuses are normalized separately from MAX', () => {
+test('Telegram download statuses are normalized separately from MAX', () => {
   assert.deepEqual(
     normalizeTelegramDownloadResult({ status: 'accepted' }),
     { status: 'requested', platformStatus: 'accepted' }
@@ -198,7 +198,7 @@ test('native and effective sharing capabilities are distinct', () => {
 })
 
 
-test('captured MAX and legacy Telegram SDK methods retain their receiver', async () => {
+test('captured MAX and Telegram SDK methods retain their receiver', async () => {
   const calls = []
   const maxBridge = {
     platform: 'android',

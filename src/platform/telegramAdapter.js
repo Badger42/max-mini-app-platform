@@ -49,8 +49,8 @@ function supportsVersion(webApp, requiredVersion) {
 }
 
 /**
- * Legacy adapter retained until the preceding platform-migration stage removes
- * Telegram from this repository.
+ * Telegram adapter. Telegram is a first-class supported platform alongside
+ * regular Web and MAX.
  * @param {import('./platformTypes.js').TelegramBridge} webApp
  * @param {import('./platformTypes.js').PlatformAdapterOptions} [options]
  * @returns {import('./platformTypes.js').PlatformAdapter}

@@ -7,7 +7,7 @@ const MAX_LAUNCH_KEYS = ['WebAppData', 'WebAppPlatform', 'WebAppVersion']
  * This is environment detection only, never authentication.
  *
  * @param {string|null|undefined} hash
- * @returns {import('./platformTypes.js').LaunchDetectionResult & {platform: import('./platformTypes.js').MaxClientPlatform|null, version: string|null}}
+ * @returns {import('./platformTypes.js').MaxLaunchParseResult}
  */
 export function parseMaxLaunchHash(hash) {
   const fragment = String(hash || '').replace(/^#/, '')

@@ -25,8 +25,12 @@ void invalidCorrelatedDownload
 const currentBridgeType = 'max'
 
 /** @type {import('../src/platform/platformTypes.js').BridgeType} */
-// @ts-expect-error Telegram is retained only in the explicitly legacy type.
-const invalidCurrentBridgeType = 'telegram'
+const telegramBridgeType = 'telegram'
+
+/** @type {import('../src/platform/platformTypes.js').BridgeType} */
+// @ts-expect-error `web` is represented by null in the selected adapter.
+const invalidCurrentBridgeType = 'web'
 
 void currentBridgeType
+void telegramBridgeType
 void invalidCurrentBridgeType

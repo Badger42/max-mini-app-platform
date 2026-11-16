@@ -5,7 +5,7 @@ import createTelegramAdapter from './telegramAdapter.js'
 
 /**
  * Select exactly one adapter before Vue is mounted.
- * `null` selects Web; the Telegram branch is a legacy compatibility path.
+ * `null` selects Web; the Telegram branch is a supported platform path.
  *
  * @param {import('./platformTypes.js').CreatePlatformOptions} [options]
  * @returns {import('./platformTypes.js').PlatformAdapter}

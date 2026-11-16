@@ -1,12 +1,10 @@
 /**
- * Domain types for the public Web + MAX adapter contract.
+ * Domain types for the public Web, MAX and Telegram adapter contract.
  *
- * Telegram is retained as a legacy implementation until the preceding
- * platform-migration stage is applied. New integrations should use only
- * `BridgeType` (`null` for Web or `max` for MAX).
+ * `null` represents regular Web. MAX and Telegram are first-class supported
+ * host platforms; neither is a legacy-only compatibility path.
  *
- * @typedef {null|'max'} BridgeType
- * @typedef {'telegram'} LegacyBridgeType
+ * @typedef {null|'max'|'telegram'} BridgeType
  * @typedef {'web'|'max'|'telegram'} LaunchContext
  * @typedef {'detected'|'not-detected'|'invalid'} LaunchDetectionStatus
  * @typedef {'ios'|'android'|'desktop'|'web'} MaxClientPlatform
@@ -17,15 +15,24 @@
  */
 
 /**
- * A result from parsing a host's launch fragment. `invalid` means duplicate
- * protocol keys were present; it is not an authentication result.
- *
+ * A normalized launch-detection outcome. This is a domain result shape; the
+ * platform-specific parsers below intentionally retain their own SDK fields.
  * @typedef {Object} LaunchDetectionResult
+ * @property {LaunchContext} context
+ * @property {LaunchDetectionStatus} status
+ *
+ * @typedef {Object} MaxLaunchParseResult
  * @property {LaunchDetectionStatus} status
  * @property {boolean} isMaxLaunch
  * @property {MaxClientPlatform|null} platform
  * @property {string|null} version
- * @property {boolean} invalid
+ * @property {boolean} invalid Duplicate protocol keys were found.
+ *
+ * @typedef {Object} TelegramLaunchParseResult
+ * @property {boolean} isTelegramLaunch
+ * @property {string|null} platform
+ * @property {string|null} version
+ * @property {boolean} invalid Duplicate protocol keys were found.
  */
 
 /** @typedef {Object} DownloadOptions
@@ -48,6 +55,8 @@
  * @typedef {{messageId: string}} TelegramPreparedMessageInput
  * @typedef {MaxPreparedMessageInput|TelegramPreparedMessageInput} PreparedMessageInput
  * @typedef {{status: MaxSharePlatformStatus}} MaxShareContentResponse
+ * @typedef {{status: MaxSharePlatformStatus}} MaxShareUrlResult
+ * @typedef {{status: MaxSharePlatformStatus}} MaxPreparedMessageResult
  */
 
 /** @typedef {{status: MaxDownloadPlatformStatus}} MaxDownloadResponse */
@@ -78,8 +87,7 @@
  */
 
 /**
- * Legacy Telegram bridge shape. This is isolated from the canonical BridgeType
- * so the remaining migration can be removed without changing MAX contracts.
+ * Telegram bridge surface consumed by the first-class Telegram adapter.
  * @typedef {Object} TelegramBridge
  * @property {string} [platform]
  * @property {string} [version]
@@ -124,8 +132,8 @@
  */
 
 /**
- * `opened` and browser-fallback `requested` are retained only for the legacy
- * Telegram implementation. Web and MAX return shared/cancelled/copied.
+ * Telegram's share composer can be opened through the host link API or a
+ * browser fallback; those outcomes are distinct from a completed share.
  * @typedef {Object} ShareUrlResult
  * @property {'shared'|'cancelled'|'copied'|'opened'|'requested'|'unavailable'} status
  */
@@ -161,7 +169,7 @@
 
 /**
  * @typedef {PlatformServices & {
- *   bridgeType: BridgeType|LegacyBridgeType,
+ *   bridgeType: BridgeType,
  *   bridgeAvailable: boolean,
  *   bridgeError: Error|null,
  *   runtime: PlatformRuntime,
@@ -175,10 +183,9 @@
  */
 
 /**
- * Options accepted by the platform selector. The legacy Telegram branch is
- * retained until the preceding migration stage is completed.
+ * Options accepted by the platform selector.
  * @typedef {Object} CreatePlatformOptions
- * @property {BridgeType|LegacyBridgeType|'web'} [bridgeType]
+ * @property {BridgeType|'web'} [bridgeType]
  * @property {MaxBridge|TelegramBridge|null} [bridge]
  * @property {Error|string|null} [error]
  * @property {DownloadOptions} [downloadOptions]
