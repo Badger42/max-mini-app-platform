@@ -1,8 +1,13 @@
 import createWebAdapter from './webAdapter.js'
 
 /**
- * Shared implementation for recognized hosts whose SDK failed to load.
- * Keep browser fallbacks while preserving which host launched the application.
+ * Shared implementation for a recognized host whose SDK failed to load.
+ * The Telegram branch is retained only until the preceding migration stage.
+ *
+ * @param {'max'|'telegram'} bridgeType
+ * @param {Error|string|null} error
+ * @param {import('./platformTypes.js').PlatformAdapterOptions} [options]
+ * @returns {import('./platformTypes.js').PlatformAdapter}
  */
 export default function createFallbackAdapter(
   bridgeType,
@@ -29,6 +34,7 @@ export default function createFallbackAdapter(
       nativeExternalLinks: false,
       nativePlatformLinks: false,
       closingConfirmation: false,
+      nativeShareUrl: false,
       sharePreparedMessage: false
     }
   }

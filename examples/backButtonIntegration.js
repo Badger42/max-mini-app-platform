@@ -1,9 +1,12 @@
 import bindBackButton from '../src/platform/bindBackButton.js'
 
 /**
- * Connect one platform BackButton handler to the consuming app's existing
- * modal manager and Router. The integration deliberately assumes no specific
- * modal library or navigation-history implementation.
+ * @param {{
+ *   platform: import('../src/platform/platformTypes.js').PlatformAdapter,
+ *   router: import('../src/platform/bindBackButton.js').BackButtonRouter,
+ *   modalManager: {hasOpenModal: () => boolean, closeTopModal: () => void|Promise<void>},
+ *   navigationHistory: {canGoBack: () => boolean}
+ * }} options
  */
 export default function setupBackButtonIntegration({
   platform,

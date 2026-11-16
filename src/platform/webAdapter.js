@@ -1,17 +1,18 @@
 import downloadBlob from './downloadBlob.js'
-import { WEB_LAUNCH_CONTEXT } from './detectLaunchContext.js'
 import {
-  invokeDownloadService,
-  openInBrowser,
   requireHttpsUrl,
+  requireFileName,
+  openInBrowser,
   unavailable
 } from './adapterUtils.js'
 
-export default function createWebAdapter({
-  downloadOptions = {},
-  services = {},
-  launchContext = WEB_LAUNCH_CONTEXT
-} = {}) {
+/**
+ * Create the regular browser adapter. The sharing capability is effective:
+ * Web Share API or Clipboard may provide it without a host bridge.
+ * @param {import('./platformTypes.js').PlatformAdapterOptions} [options]
+ * @returns {import('./platformTypes.js').PlatformAdapter}
+ */
+export default function createWebAdapter({ downloadOptions = {} } = {}) {
   const hasWebShare = (
     typeof navigator !== 'undefined' &&
     typeof navigator.share === 'function'
@@ -26,7 +27,6 @@ export default function createWebAdapter({
     bridgeType: null,
     bridgeAvailable: false,
     bridgeError: null,
-    launchContext,
 
     runtime: {
       clientPlatform: null,
@@ -35,6 +35,7 @@ export default function createWebAdapter({
       browser: {
         userAgent: typeof navigator !== 'undefined' ? navigator.userAgent || null : null
       },
+      // Backward-compatible aliases. Prefer clientPlatform/clientVersion.
       platform: null,
       version: null
     },
@@ -45,28 +46,59 @@ export default function createWebAdapter({
       nativeExternalLinks: false,
       nativePlatformLinks: false,
       closingConfirmation: false,
+      nativeShareUrl: false,
       shareUrl: Boolean(hasWebShare || hasClipboard),
       sharePreparedMessage: false
     },
 
+    /**
+     * @param {string} url
+     * @param {string} fileName
+     * @param {import('./platformTypes.js').DownloadOptions} [options]
+     * @returns {Promise<import('./platformTypes.js').DownloadResult>}
+     */
     downloadFile(url, fileName, options = {}) {
-      return invokeDownloadService(
-        services.downloadFile,
-        url,
-        fileName,
-        { ...downloadOptions, ...options },
-        downloadBlob
-      )
+      let validUrl
+      let validFileName
+      try {
+        validUrl = requireHttpsUrl(url, 'downloadFile')
+        validFileName = requireFileName(fileName)
+      } catch (error) {
+        return Promise.reject(error)
+      }
+
+      return downloadBlob(validUrl, validFileName, {
+        ...downloadOptions,
+        ...options
+      })
     },
 
+    /**
+     * @param {string} url
+     * @returns {import('./platformTypes.js').LinkOpenResult}
+     */
     openExternalLink(url) {
       return openInBrowser(requireHttpsUrl(url, 'openExternalLink'))
     },
 
+    /**
+     * A regular browser has no host-specific deep-link API; opening the
+     * supplied HTTPS URL is only a browser request, not a native MAX action.
+     * @param {string} url
+     * @returns {import('./platformTypes.js').LinkOpenResult}
+     */
     openPlatformLink(url) {
       return openInBrowser(requireHttpsUrl(url, 'openPlatformLink'))
     },
 
+    /**
+     * Prefer Web Share API; use Clipboard only when Web Share is unavailable.
+     * Clipboard is reported as copied only after writeText resolves.
+     *
+     * @param {string} url
+     * @param {string} [text]
+     * @returns {Promise<import('./platformTypes.js').ShareUrlResult>}
+     */
     async shareUrl(url, text = '') {
       const validUrl = requireHttpsUrl(url, 'shareUrl')
 
@@ -75,7 +107,7 @@ export default function createWebAdapter({
           await navigator.share({ url: validUrl, text: text || undefined })
           return { status: 'shared' }
         } catch (error) {
-          if (error && error.name === 'AbortError') {
+          if (error instanceof Error && error.name === 'AbortError') {
             return { status: 'cancelled' }
           }
           throw error
@@ -90,6 +122,7 @@ export default function createWebAdapter({
       return unavailable('URL sharing')
     },
 
+    /** @returns {Promise<never>} */
     sharePreparedMessage() {
       return unavailable('Prepared-message sharing')
     },
@@ -98,7 +131,9 @@ export default function createWebAdapter({
       supported: false,
       show() {},
       hide() {},
-      onClick() { return () => {} }
+      onClick() {
+        return () => {}
+      }
     },
 
     enableClosingConfirmation() {},

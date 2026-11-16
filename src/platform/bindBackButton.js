@@ -1,10 +1,28 @@
 /**
+ * @typedef {Object} BackButtonRouter
+ * @property {() => void} back
+ * @property {(handler: () => void) => (() => void)|void} afterEach
+ * @property {(handler: (error: unknown) => void) => (() => void)|void} [onError]
+ */
+
+/**
+ * @typedef {Object} BindBackButtonOptions
+ * @property {Pick<import('./platformTypes.js').PlatformAdapter, 'backButton'>} platform
+ * @property {BackButtonRouter} router
+ * @property {() => boolean} hasOpenModal
+ * @property {() => void|Promise<void>} closeTopModal
+ * @property {() => boolean} canGoBack
+ * @property {(handler: () => void) => (() => void)|void} [subscribeModalChanges]
+ * @property {number} [navigationUnlockTimeoutMs]
+ * @property {(error: unknown) => void} [onError]
+ */
+
+/**
  * Connect one native BackButton subscription to the application's modal manager
- * and Vue Router. The helper knows nothing about a particular modal library.
+ * and Vue Router. The helper does not depend on a specific modal library.
  *
- * `subscribeModalChanges` is optional. When supplied, it should return an
- * unsubscribe function and notify the helper after modal state changes.
- * Otherwise call refresh() after opening/closing a modal.
+ * @param {BindBackButtonOptions} options
+ * @returns {{refresh: () => void, dispose: () => void}}
  */
 export default function bindBackButton({
   platform,
@@ -30,7 +48,14 @@ export default function bindBackButton({
   let disposed = false
   let handlingBack = false
   let navigationPending = false
+  /** @type {number|null} */
   let navigationTimer = null
+
+  const refresh = () => {
+    if (disposed || !platform.backButton.supported) return
+    if (hasOpenModal() || canGoBack()) platform.backButton.show()
+    else platform.backButton.hide()
+  }
 
   const releaseNavigation = () => {
     navigationPending = false
@@ -41,19 +66,8 @@ export default function bindBackButton({
     refresh()
   }
 
-  const refresh = () => {
-    if (disposed || !platform.backButton.supported) return
-
-    if (hasOpenModal() || canGoBack()) {
-      platform.backButton.show()
-    } else {
-      platform.backButton.hide()
-    }
-  }
-
   const handleBack = async () => {
     if (disposed || handlingBack || navigationPending) return
-
     handlingBack = true
 
     try {
@@ -64,19 +78,13 @@ export default function bindBackButton({
 
       if (canGoBack()) {
         navigationPending = true
-        // Start the safety timer before invoking the router so a synchronous
-        // exception cannot leave navigationPending locked without a timer.
         navigationTimer = setTimeout(releaseNavigation, navigationUnlockTimeoutMs)
-
         try {
           router.back()
         } catch (error) {
           releaseNavigation()
           throw error
         }
-
-        // Vue Router's back() returns void. afterEach/onError release the lock;
-        // the timeout is a safety net if the history traversal has no result.
         return
       }
 
@@ -102,11 +110,9 @@ export default function bindBackButton({
 
   return {
     refresh,
-
     dispose() {
       if (disposed) return
       disposed = true
-
       if (typeof unsubscribeBack === 'function') unsubscribeBack()
       if (typeof unsubscribeRoute === 'function') unsubscribeRoute()
       if (typeof unsubscribeRouterError === 'function') unsubscribeRouterError()
@@ -115,7 +121,6 @@ export default function bindBackButton({
         clearTimeout(navigationTimer)
         navigationTimer = null
       }
-
       platform.backButton.hide()
     }
   }

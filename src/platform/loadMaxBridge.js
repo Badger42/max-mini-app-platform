@@ -5,16 +5,16 @@ const BRIDGE_SCRIPT_ID = 'max-web-app-bridge'
 const DEFAULT_TIMEOUT_MS = 5000
 
 /**
- * Dynamically load MAX Bridge. Call only after MAX launch parameters were found.
- * A rejected load may be retried explicitly; late load events cannot resolve
- * the already rejected attempt or switch an adapter selected by the bootstrap.
+ * Dynamically load MAX Bridge. Call after MAX launch parameters were detected.
+ * @param {{timeoutMs?: number}} [options]
+ * @returns {Promise<import('./platformTypes.js').MaxBridge>}
  */
 export default function loadMaxBridge({ timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   return loadBridgeScript({
     url: BRIDGE_URL,
     scriptId: BRIDGE_SCRIPT_ID,
     timeoutMs,
-    getBridge: () => window.WebApp,
+    getBridge: () => /** @type {Window & {WebApp?: import('./platformTypes.js').MaxBridge}} */ (window).WebApp,
     errorMessage: 'MAX Bridge'
   })
 }

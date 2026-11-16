@@ -1,61 +1,43 @@
-# Applying Phase 2 — Web + MAX integration architecture
+# Stage 3 — Domain contracts and typing
 
-This overlay targets `Badger42/max-mini-app-platform` after Stage 1, at base
-commit `cb38e600fd90d35c1bd095780299255f561f9772`.
+This archive is a source-overlay patch bundle for `Badger42/max-mini-app-platform`.
+It contains only files changed or added for the Stage 3 work. Extract it at the
+repository root and allow the files to overwrite their existing counterparts.
 
-## Apply
+## Apply and validate
 
-1. Create a feature branch from the target commit.
-2. Copy the files from this archive into the repository root, preserving paths.
-3. Delete the paths listed in `DELETE-FILES.txt`.
-4. Run `npm test` with Node.js 20 or newer.
-5. Review the diff and validate in a real MAX WebView before release.
-
-## API migration
-
-Replace the old string detector and factory arguments:
-
-```js
-const detectedPlatform = detectPlatform()
-createPlatform({ bridgeType: detectedPlatform === 'web' ? null : detectedPlatform })
+```bash
+# From the repository root, after extracting the archive:
+npm install
+npm run typecheck
+npm test
 ```
 
-with the Launch Context pipeline:
+`typescript` is added as a development dependency. Runtime source remains plain
+JavaScript; TypeScript is used only for JSDoc `checkJs` validation and compile-time
+contract assertions.
 
-```js
-const launchContext = detectLaunchContext()
-let bridge = null
-let bridgeError = null
+## Scope note
 
-if (launchContext.type === 'max') {
-  try {
-    bridge = await loadMaxBridge()
-  } catch (error) {
-    bridgeError = error
-  }
-}
+The source branch inspected for this patch still contains Telegram launch
+handling and adapters. Their removal is assigned to Stage 2 in the supplied
+plan, so this patch does not silently delete those paths. Their types and
+normalizers are isolated as legacy compatibility code. The canonical
+`BridgeType` is Web (`null`) or MAX (`'max'`). `runtime.platform` and
+`runtime.version` remain documented migration aliases because this repository
+does not contain evidence that all external consuming applications have
+migrated.
 
-const platform = createPlatform({
-  launchContext,
-  bridge,
-  bridgeError,
-  services: { downloadFile: existingDownloadService }
-})
-```
+## Verification performed while preparing this bundle
 
-The adapter now exposes `launchContext.type` (`web|max`) and retains
-`bridgeType` (`null|max`) for bridge identity. The old `detectPlatform()` and
-`createPlatform({ bridgeType, error })` shapes are replaced. MAX fallback
-creation now requires the Launch Context and Bridge error.
+- `npm run typecheck` passed using TypeScript 5.8.3 available in the build
+  environment.
+- Focused Node tests passed: `tests/platform-contracts.test.mjs` and
+  `tests/stage1-regressions.test.mjs` (18 tests).
+- The complete repository test suite was not run against a full checkout in
+  this environment. The GitHub integration allowed reading the repository but
+  rejected branch/ref writes with HTTP 403, and a local clone was unavailable.
 
-## Download service integration
-
-The consuming application's function must have the shape
-`downloadFile(url, fileName, options) => Promise`. It receives relative URLs
-unchanged. If an Axios implementation resolves to a Blob, wrap it in the
-consuming app and save the Blob before resolving. No Axios dependency is added
-to this module.
-
-Native MAX download is not routed through this service when native capability
-exists; it is invoked synchronously from the user action and accepts only an
-absolute HTTPS URL.
+This archive is not a Git-generated unified diff. It is an overlay bundle with
+repository-relative paths so it can be applied without replacing unrelated
+files.

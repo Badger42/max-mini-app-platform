@@ -1,8 +1,13 @@
+/** @type {Map<string, Promise<object>>} */
 const pendingLoads = new Map()
 
 /**
- * Load one SDK script and return the bridge object exposed by that SDK.
- * A failed attempt is evicted from the in-flight map so callers may retry.
+ * Load a browser SDK script and resolve the object created by the SDK.
+ * A failed attempt is evicted from the in-flight map so a later call can retry.
+ *
+ * @template {object} TBridge
+ * @param {{url: string, scriptId: string, timeoutMs?: number, getBridge: () => TBridge|null|undefined, errorMessage: string}} options
+ * @returns {Promise<TBridge>}
  */
 export default function loadBridgeScript({
   url,
@@ -15,23 +20,20 @@ export default function loadBridgeScript({
     return Promise.reject(new Error('Platform SDKs can only be loaded in a browser'))
   }
 
-  if (typeof getBridge !== 'function') {
-    return Promise.reject(new TypeError('getBridge must be a function'))
-  }
-
   const existingBridge = getBridge()
   if (existingBridge && typeof existingBridge === 'object') {
     return Promise.resolve(existingBridge)
   }
 
   if (pendingLoads.has(scriptId)) {
-    return pendingLoads.get(scriptId)
+    return /** @type {Promise<TBridge>} */ (pendingLoads.get(scriptId))
   }
 
   const promise = new Promise((resolve, reject) => {
-    let script = document.getElementById(scriptId)
+    let script = /** @type {HTMLScriptElement|null} */ (document.getElementById(scriptId))
     const isNewScript = !script
     let settled = false
+    /** @type {number|undefined} */
     let timeoutId
 
     if (!script) {
@@ -42,24 +44,22 @@ export default function loadBridgeScript({
     }
 
     const cleanup = () => {
-      clearTimeout(timeoutId)
+      if (timeoutId !== undefined) clearTimeout(timeoutId)
       script.removeEventListener('load', onLoad)
       script.removeEventListener('error', onError)
     }
 
+    /** @param {string} message */
     const fail = message => {
       if (settled) return
       settled = true
       cleanup()
-      if (isNewScript && typeof script.remove === 'function') {
-        script.remove()
-      }
+      if (isNewScript && typeof script.remove === 'function') script.remove()
       reject(new Error(message))
     }
 
     const onLoad = () => {
       if (settled) return
-
       const bridge = getBridge()
       if (!bridge || typeof bridge !== 'object') {
         fail(`${errorMessage}: script loaded but the bridge object was not created`)
@@ -68,8 +68,6 @@ export default function loadBridgeScript({
 
       settled = true
       cleanup()
-      // Keep only in-flight work in the registry. The bridge is checked above
-      // on subsequent calls, while a fresh runtime can still retry after reset.
       pendingLoads.delete(scriptId)
       resolve(bridge)
     }
@@ -78,19 +76,16 @@ export default function loadBridgeScript({
 
     script.addEventListener('load', onLoad)
     script.addEventListener('error', onError)
-
-    timeoutId = setTimeout(() => {
+    timeoutId = window.setTimeout(() => {
       fail(`${errorMessage}: timed out after ${timeoutMs} ms`)
     }, timeoutMs)
 
-    if (isNewScript) {
-      document.head.appendChild(script)
-    }
+    if (isNewScript) document.head.appendChild(script)
   }).catch(error => {
     pendingLoads.delete(scriptId)
     throw error
   })
 
   pendingLoads.set(scriptId, promise)
-  return promise
+  return /** @type {Promise<TBridge>} */ (promise)
 }

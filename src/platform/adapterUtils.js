@@ -1,8 +1,14 @@
 /**
- * Platform-neutral helpers shared by the Web and MAX adapters.
- * Platform-specific SDK method names remain inside their adapters.
+ * Platform-neutral helpers shared by adapters. Platform-specific SDK method
+ * names and status values remain in their respective adapter modules.
  */
 
+/**
+ * Validate and canonicalize an absolute HTTPS URL.
+ * @param {unknown} value
+ * @param {string} [methodName]
+ * @returns {string}
+ */
 export function requireHttpsUrl(value, methodName = 'operation') {
   if (typeof value !== 'string' || !value.trim()) {
     throw new TypeError(`${methodName}: a URL is required`)
@@ -11,7 +17,7 @@ export function requireHttpsUrl(value, methodName = 'operation') {
   let url
   try {
     url = new URL(value)
-  } catch (_) {
+  } catch {
     throw new TypeError(`${methodName}: a valid absolute URL is required`)
   }
 
@@ -26,62 +32,159 @@ export function requireHttpsUrl(value, methodName = 'operation') {
   return url.href
 }
 
+/**
+ * MAX deep links are documented as `https://max.ru/...`. Do not accept
+ * look-alike domains such as `max.ru.attacker.example` or `evilmax.ru`.
+ * @param {unknown} value
+ * @param {string} [methodName]
+ * @returns {string}
+ */
+export function requireMaxDeepLink(value, methodName = 'openPlatformLink') {
+  const href = requireHttpsUrl(value, methodName)
+  const url = new URL(href)
+
+  if (url.hostname !== 'max.ru') {
+    throw new TypeError(`${methodName}: a MAX deep link on https://max.ru is required`)
+  }
+
+  return href
+}
+
+/**
+ * Validate a file name before starting either native or browser download.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function requireFileName(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new TypeError('A file name is required')
+  }
+  return value
+}
+
+/**
+ * `window.open()` returns null with noopener in several browsers, even when
+ * the new tab was requested successfully. Do not interpret that as failure.
+ * @param {string} url
+ * @returns {import('./platformTypes.js').LinkOpenResult}
+ */
 export function openInBrowser(url) {
   if (typeof window === 'undefined' || typeof window.open !== 'function') {
     return { status: 'unavailable' }
   }
 
-  // noopener can make window.open() return null even when the tab was requested.
   window.open(url, '_blank', 'noopener,noreferrer')
   return { status: 'requested' }
 }
 
+/** @returns {boolean} */
 export function canOpenInBrowser() {
   return typeof window !== 'undefined' && typeof window.open === 'function'
 }
 
 /**
- * Invoke the application's download service or the standalone Blob fallback.
- * The injected service owns URL/authentication/Axios details. In particular,
- * the Web adapter must not rewrite relative API URLs to absolute HTTPS URLs.
+ * Error raised when an SDK resolves with an undocumented or malformed result.
  */
-export function invokeDownloadService(service, url, fileName, options, fallback) {
-  if (typeof url !== 'string' || !url.trim()) {
-    return Promise.reject(new TypeError('downloadFile: a URL is required'))
+export class PlatformProtocolError extends Error {
+  /**
+   * @param {'downloadFile'|'shareUrl'|'sharePreparedMessage'} operation
+   * @param {string|null} receivedStatus
+   */
+  constructor(operation, receivedStatus) {
+    const label = receivedStatus || 'missing status'
+    super(`Unexpected ${operation} result from platform SDK: ${label}`)
+    this.name = 'PlatformProtocolError'
+    /** @type {'downloadFile'|'shareUrl'|'sharePreparedMessage'} */
+    this.operation = operation
+    /** @type {string|null} */
+    this.receivedStatus = receivedStatus
   }
-
-  if (typeof fileName !== 'string' || !fileName.trim()) {
-    return Promise.reject(new TypeError('A file name is required'))
-  }
-
-  if (service !== undefined && service !== null && typeof service !== 'function') {
-    return Promise.reject(new TypeError('services.downloadFile must be a function'))
-  }
-
-  let operation
-  try {
-    operation = typeof service === 'function'
-      ? service(url, fileName, options)
-      : fallback(url, fileName, options)
-  } catch (error) {
-    return Promise.reject(error)
-  }
-
-  return Promise.resolve(operation).then(result => {
-    // The public contract intentionally exposes a small, adapter-neutral result.
-    if (result && typeof result.status === 'string') {
-      if (result.status === 'cancelled') return { status: 'cancelled' }
-      if (result.status !== 'requested') {
-        throw new Error(`Unexpected download service result: ${result.status}`)
-      }
-    }
-    return { status: 'requested' }
-  })
 }
 
 /**
- * The native BackButton API must be complete before it is advertised as
- * supported: offClick is required for deterministic subscription disposal.
+ * Read a status from untrusted SDK output without widening it to arbitrary
+ * strings at the public boundary.
+ * @param {unknown} result
+ * @returns {string|null}
+ */
+function readPlatformStatus(result) {
+  if (typeof result !== 'object' || result === null || !('status' in result)) {
+    return null
+  }
+  return typeof result.status === 'string' ? result.status : null
+}
+
+/**
+ * Normalize only MAX's documented download statuses:
+ * `downloading` and `cancelled`.
+ * @param {unknown} result
+ * @returns {import('./platformTypes.js').DownloadResult}
+ */
+export function normalizeMaxDownloadResult(result) {
+  const platformStatus = readPlatformStatus(result)
+
+  switch (platformStatus) {
+    case 'downloading':
+      return { status: 'requested', platformStatus }
+    case 'cancelled':
+      return { status: 'cancelled', platformStatus }
+    default:
+      throw new PlatformProtocolError('downloadFile', platformStatus)
+  }
+}
+
+/**
+ * Legacy Telegram's callback result is normalized independently from MAX.
+ * @param {unknown} result
+ * @returns {import('./platformTypes.js').DownloadResult}
+ */
+export function normalizeTelegramDownloadResult(result) {
+  const platformStatus = readPlatformStatus(result)
+
+  switch (platformStatus) {
+    case 'accepted':
+      return { status: 'requested', platformStatus }
+    case 'cancelled':
+      return { status: 'cancelled', platformStatus }
+    default:
+      throw new PlatformProtocolError('downloadFile', platformStatus)
+  }
+}
+
+/**
+ * MAX shareMaxContent() documents only `shared` and `cancelled` outcomes.
+ * @param {unknown} result
+ * @returns {import('./platformTypes.js').ShareUrlResult}
+ */
+export function normalizeMaxShareResult(result) {
+  const platformStatus = readPlatformStatus(result)
+
+  if (platformStatus === 'shared' || platformStatus === 'cancelled') {
+    return { status: platformStatus }
+  }
+
+  throw new PlatformProtocolError('shareUrl', platformStatus)
+}
+
+/**
+ * Prepared-message sharing has its own public result type even though MAX uses
+ * the same SDK method and currently documents the same two platform statuses.
+ * @param {unknown} result
+ * @returns {import('./platformTypes.js').PreparedMessageResult}
+ */
+export function normalizeMaxPreparedMessageResult(result) {
+  const platformStatus = readPlatformStatus(result)
+  if (platformStatus === 'shared' || platformStatus === 'cancelled') {
+    return { status: platformStatus }
+  }
+  throw new PlatformProtocolError('sharePreparedMessage', platformStatus)
+}
+
+/**
+ * Normalizes the structurally identical BackButton APIs used by MAX and the
+ * legacy Telegram adapter. The returned unsubscribe function is idempotent.
+ * @param {import('./platformTypes.js').NativeBackButton|undefined} nativeBackButton
+ * @returns {import('./platformTypes.js').BackButtonService}
  */
 export function createBackButton(nativeBackButton) {
   const supported = Boolean(
@@ -94,16 +197,22 @@ export function createBackButton(nativeBackButton) {
 
   return {
     supported,
+
     show() {
-      if (supported) return nativeBackButton.show()
+      if (supported && nativeBackButton) nativeBackButton.show()
     },
+
     hide() {
-      if (supported) return nativeBackButton.hide()
+      if (supported && nativeBackButton) nativeBackButton.hide()
     },
+
     onClick(handler) {
       if (!supported || typeof handler !== 'function') return () => {}
+
+      if (!nativeBackButton) return () => {}
       nativeBackButton.onClick(handler)
       let subscribed = true
+
       return () => {
         if (!subscribed) return
         subscribed = false
@@ -113,6 +222,10 @@ export function createBackButton(nativeBackButton) {
   }
 }
 
+/**
+ * Normalize native closing-confirmation methods.
+ * @param {Pick<import('./platformTypes.js').MaxBridge, 'enableClosingConfirmation'|'disableClosingConfirmation'>|Pick<import('./platformTypes.js').TelegramBridge, 'enableClosingConfirmation'|'disableClosingConfirmation'>} bridge
+ */
 export function createClosingConfirmation(bridge) {
   const supported = Boolean(
     bridge &&
@@ -123,48 +236,18 @@ export function createClosingConfirmation(bridge) {
   return {
     supported,
     enable() {
-      if (supported) return bridge.enableClosingConfirmation()
+      if (typeof bridge.enableClosingConfirmation === 'function') bridge.enableClosingConfirmation()
     },
     disable() {
-      if (supported) return bridge.disableClosingConfirmation()
+      if (typeof bridge.disableClosingConfirmation === 'function') bridge.disableClosingConfirmation()
     }
   }
 }
 
-/** MAX reports `downloading` when the native request has been accepted. */
-export function normalizeDownloadResult(result) {
-  const platformStatus = result && typeof result.status === 'string'
-    ? result.status
-    : null
-
-  if (platformStatus === 'downloading') {
-    return { status: 'requested', platformStatus }
-  }
-
-  if (platformStatus === 'cancelled') {
-    return { status: 'cancelled', platformStatus }
-  }
-
-  throw new Error(
-    `Unexpected download result from MAX Bridge: ${platformStatus || 'missing status'}`
-  )
-}
-
-/** MAX shareMaxContent() documents only `shared` and `cancelled` outcomes. */
-export function normalizeShareResult(result) {
-  const platformStatus = result && typeof result.status === 'string'
-    ? result.status
-    : null
-
-  if (platformStatus === 'shared' || platformStatus === 'cancelled') {
-    return { status: platformStatus }
-  }
-
-  throw new Error(
-    `Unexpected share result from MAX Bridge: ${platformStatus || 'missing status'}`
-  )
-}
-
+/**
+ * @param {string} methodName
+ * @returns {Promise<never>}
+ */
 export function unavailable(methodName) {
   return Promise.reject(new Error(`${methodName} is not available in this runtime`))
 }

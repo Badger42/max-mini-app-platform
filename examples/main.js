@@ -1,48 +1,51 @@
-// Example bootstrap for Vue 3 + Vue CLI. Merge this flow into your existing
-// src/main.js; keep Router, store, Axios and other app registrations.
+// Example bootstrap for Vue CLI + Vue 3.
+// Merge this flow into your existing src/main.js and keep your existing
+// Router, store, Axios and other plugin registrations before mount().
 
 import { createApp } from 'vue'
 import App from '../src/App.vue'
 
-import detectLaunchContext from '../src/platform/detectLaunchContext.js'
+import detectPlatform from '../src/platform/detectPlatform.js'
 import loadMaxBridge from '../src/platform/loadMaxBridge.js'
+import loadTelegramBridge from '../src/platform/loadTelegramBridge.js'
 import createPlatform from '../src/platform/createPlatform.js'
 import PlatformPlugin from '../src/plugins/platform.js'
 
-// Assign your existing app download function here when you want to keep its
-// Axios interceptors, cookie settings, headers and Blob handling. Omit it to
-// use the module's standalone Fetch/Blob fallback.
-const services = {
-  // downloadFile: existingDownloadService
-}
-
 async function bootstrap() {
-  // Do this before creating Vue Router: a router may rewrite the URL fragment.
-  const launchContext = detectLaunchContext()
+  const detectedPlatform = detectPlatform()
+  const bridgeType = detectedPlatform === 'web' ? null : detectedPlatform
 
+  /** @type {import('../src/platform/platformTypes.js').MaxBridge|import('../src/platform/platformTypes.js').TelegramBridge|null} */
   let bridge = null
+  /** @type {Error|null} */
   let bridgeError = null
 
-  if (launchContext.type === 'max') {
+  if (bridgeType === 'max') {
     try {
       bridge = await loadMaxBridge({ timeoutMs: 5000 })
     } catch (error) {
-      bridgeError = error
+      bridgeError = error instanceof Error ? error : new Error(String(error))
       console.error('[platform] MAX Bridge unavailable:', error)
+    }
+  } else if (bridgeType === 'telegram') {
+    try {
+      bridge = await loadTelegramBridge({ timeoutMs: 5000 })
+    } catch (error) {
+      bridgeError = error instanceof Error ? error : new Error(String(error))
+      console.error('[platform] Telegram SDK unavailable:', error)
     }
   }
 
   const platform = createPlatform({
-    launchContext,
+    bridgeType,
     bridge,
-    bridgeError,
-    services
+    error: bridgeError
   })
 
   const app = createApp(App)
   app.use(PlatformPlugin, platform)
 
-  // Register the existing Router/store/other plugins here, before mount().
+  // Register existing Router/store/other plugins here, before mount().
   // app.use(router)
   // app.use(store)
 

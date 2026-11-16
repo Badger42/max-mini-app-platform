@@ -1,11 +1,13 @@
-import { requireHttpsUrl } from './adapterUtils.js'
+import { requireHttpsUrl, requireFileName } from './adapterUtils.js'
 
 /**
- * Browser fallback for downloading a file.
+ * Browser fallback: fetch -> Blob -> object URL -> anchor click.
+ * The returned status means the download was requested, not completed.
  *
- * `credentials: 'same-origin'` is the safe default. Pass `include` only when
- * the download endpoint requires cross-origin cookies and its CORS policy
- * explicitly allows credentialed requests from the frontend origin.
+ * @param {string} url
+ * @param {string} fileName
+ * @param {import('./platformTypes.js').DownloadOptions} [options]
+ * @returns {Promise<import('./platformTypes.js').DownloadResult>}
  */
 export default async function downloadBlob(
   url,
@@ -13,10 +15,7 @@ export default async function downloadBlob(
   { credentials = 'same-origin', revokeDelayMs = 30000 } = {}
 ) {
   const validUrl = requireHttpsUrl(url, 'downloadFile')
-
-  if (!fileName || typeof fileName !== 'string' || !fileName.trim()) {
-    throw new TypeError('A file name is required')
-  }
+  const validFileName = requireFileName(fileName)
 
   if (!Number.isFinite(revokeDelayMs) || revokeDelayMs < 0) {
     throw new TypeError('revokeDelayMs must be a non-negative finite number')
@@ -45,7 +44,7 @@ export default async function downloadBlob(
   const objectUrl = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = objectUrl
-  link.download = fileName
+  link.download = validFileName
   link.style.display = 'none'
 
   document.body.appendChild(link)

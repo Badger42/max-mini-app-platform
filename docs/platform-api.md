@@ -1,154 +1,136 @@
-# Platform Adapter API
+# Unified Platform Adapter API
 
-The module supports exactly two runtime types: a regular Web application and a
-MAX Mini App. It exposes the same adapter API through the Vue plugin as
-`this.$platform`.
+The library exposes one JavaScript API for Web and MAX. JSDoc types for the
+public factory, services, capabilities and operation results live in
+`src/platform/platformTypes.js`; `npm run typecheck` validates runtime JS
+without compiling or emitting TypeScript output.
 
-## Launch context
+> **Legacy migration path:** this repository still contains Telegram adapter
+> support. Removing Telegram and changing launch detection belongs to the
+> preceding platform-migration stage. New code should target Web (`bridgeType`
+> `null`) or MAX (`bridgeType` `'max'`).
 
-Call `detectLaunchContext()` before creating Vue Router or mounting the app.
-The returned object has this shape:
-
-```js
-{
-  type: 'max', // 'web' | 'max'
-  launch: {
-    platform: 'android', // 'ios' | 'android' | 'desktop' | 'web' | null
-    version: '...',
-  },
-  detection: {
-    status: 'valid', // 'valid' | 'absent' | 'invalid' | 'conflicting'
-    reason: null,
-  },
-}
-```
-
-A regular Web launch has `type: 'web'`, `launch: null`, and
-`detection.status: 'absent'`. Malformed or conflicting launch markers also fail
-closed to `type: 'web'`, but retain `invalid` or `conflicting` diagnostics. They
-do not cause a MAX Bridge request.
-
-Only the presence and shape of launch markers are inspected. The raw
-`WebAppData` value is never returned or copied into the adapter. Launch context
-is not authentication, proof of identity, or authorization to access data.
-
-## Bootstrap and factory
+## Runtime identification
 
 ```js
-const launchContext = detectLaunchContext()
-let bridge = null
-let bridgeError = null
-
-if (launchContext.type === 'max') {
-  try {
-    bridge = await loadMaxBridge()
-  } catch (error) {
-    bridgeError = error
-  }
-}
-
-const platform = createPlatform({
-  launchContext,
-  bridge,
-  bridgeError,
-  services: { downloadFile: existingDownloadService }
-})
-```
-
-`createPlatform()` selects one adapter from `launchContext.type`. A failed MAX
-Bridge produces a MAX fallback adapter; it preserves the same launch context
-and bridge error and never retries or switches adapters automatically.
-
-## Runtime identity
-
-```js
-this.$platform.launchContext
 this.$platform.bridgeType
 this.$platform.bridgeAvailable
 this.$platform.bridgeError
 this.$platform.runtime.clientPlatform
 this.$platform.runtime.clientVersion
+this.$platform.runtime.deviceName
 ```
 
-`launchContext.type` is always `'web'` or `'max'`. `bridgeType` describes the
-presence of a host bridge: `null` for Web and `'max'` for MAX, including the MAX
-fallback. `bridgeAvailable` independently reports whether the Bridge loaded.
+`bridgeType` identifies the host, not the physical device. A detected host with
+a failed SDK load receives its host-specific fallback adapter and reports
+`bridgeAvailable === false`. Runtime metadata is diagnostic only; it is not an
+authentication or authorization signal.
 
-The runtime platform/version fields prefer values reported by the SDK and fall
-back to the sanitized launch metadata when the Bridge is unavailable.
+`runtime.platform` and `runtime.version` remain deprecated aliases for
+`clientPlatform` and `clientVersion`. They are retained pending a migration
+check by external consuming applications.
 
 ## Links
 
-Use `openExternalLink(url)` and `openPlatformLink(url)`. Both require absolute
-HTTPS URLs. MAX maps them to `WebApp.openLink(url)` and
-`WebApp.openMaxLink(url)` respectively. Web uses `window.open()`.
-
-The return value `{ status: 'requested' }` means the opening API was invoked;
-it does not guarantee that a popup was not blocked or that the user followed it.
-
-## Download service
-
-The adapters accept an optional application-owned service:
-
 ```js
-createPlatform({
-  launchContext,
-  bridge,
-  services: {
-    downloadFile(url, fileName, options) {
-      return existingAxiosDownload(url, fileName, options)
-    }
-  }
-})
+this.$platform.openExternalLink('https://example.com/path')
+this.$platform.openPlatformLink('https://max.ru/some-deep-link')
 ```
 
-The service receives the URL unchanged, including relative API URLs, plus the
-file name and optional third argument. It must return a Promise. Successful
-resolution becomes `{ status: 'requested' }`; a resolved
-`{ status: 'cancelled' }` remains cancelled. Synchronous exceptions and
-rejected Promises are propagated as rejections.
+Both methods are synchronous. They return `{ status: 'requested' }` when an
+opener is invoked or `{ status: 'unavailable' }` when no browser opener exists.
+They do not confirm that a tab/screen was displayed.
 
-The adapter does not know about Axios, interceptors, credentials, headers, or
-response shapes. If the existing service returns a Blob, wrap it in the
-consuming application so that the wrapper performs the download before it
-resolves. Axios is not a dependency of this module.
+- `openExternalLink(url)` accepts an absolute HTTPS URL and uses MAX
+  `WebApp.openLink()` when available, otherwise `window.open()`.
+- MAX `openPlatformLink(url)` accepts only `https://max.ru/...` (exact
+  hostname). Use `openExternalLink()` for every other HTTPS destination.
+  When `WebApp.openMaxLink()` is unavailable, the validated MAX link is passed
+  to the browser opener.
+- Regular Web has no host-specific deep-link API; `openPlatformLink()` is a
+  browser-opening fallback, not a promise of native MAX behavior.
 
-Routing is:
+URLs must be absolute HTTPS URLs without embedded username/password
+credentials. See the [MAX Bridge API](https://dev.max.ru/docs/webapps/bridge/)
+for native link routing semantics.
 
-| Runtime | Download implementation |
-|---|---|
-| Web | Injected service, otherwise Fetch/Blob fallback |
-| MAX with native capability | `WebApp.downloadFile(url, fileName)` |
-| MAX without native capability | Injected service, otherwise Fetch/Blob fallback |
-| MAX fallback without Bridge | Injected service, otherwise Fetch/Blob fallback |
+## Capabilities
 
-The native MAX path accepts an absolute HTTPS URL only. The injected service is
-not subjected to that validation, so it can receive a relative API URL. The
-standalone Fetch/Blob fallback retains its HTTPS requirement and its own CORS
-and credentials behavior. The adapter never starts both download paths.
-
-Call the adapter's `downloadFile()` directly in the originating click handler
-when native MAX download is required. Prepare any authenticated or short-lived
-URL before the click; do not await an Axios request before calling the native
-method.
-
-## Capabilities and results
-
-All adapters expose boolean capability keys:
+All adapters expose the same boolean keys:
 
 - `nativeDownload`
 - `backButton`
 - `nativeExternalLinks`
 - `nativePlatformLinks`
 - `closingConfirmation`
+- `nativeShareUrl`
 - `shareUrl`
 - `sharePreparedMessage`
 
-The `native*` keys describe MAX Bridge support. `shareUrl` describes effective
-availability, including Web Share or clipboard fallback. `sharePreparedMessage`
-has no Web equivalent.
+`native*` values describe host-SDK support. `shareUrl` is effective capability:
+it may be true on Web because Web Share or Clipboard is available even though
+`nativeShareUrl` is false. `sharePreparedMessage` has no generic Web fallback.
 
-`downloadFile()` returns `requested` when a request was accepted/started, not
-when bytes have finished downloading. Native MAX may also return `cancelled`.
-`shareUrl()` returns `shared`, `cancelled`, or `copied` depending on the selected
-runtime and capability. Unsupported prepared-message sharing rejects.
+## Downloads
+
+```js
+const result = await this.$platform.downloadFile(url, fileName, options)
+```
+
+`result.status` is `requested` or `cancelled`. `requested` means the operation
+was accepted/started or a browser download request was triggered; it does not
+mean that the file has finished downloading. MAX `platformStatus` is only
+`downloading` or `cancelled`. Telegram's legacy callback normalizer is separate
+and uses `accepted` or `cancelled`.
+
+The MAX SDK method is invoked synchronously from `downloadFile()` to preserve
+the user click. The method returns a Promise and converts synchronous SDK
+throws into rejected Promises. Browser fallback uses `fetch` and Blob; configure
+`credentials` only according to the endpoint's CORS and cookie requirements.
+
+## Sharing URLs
+
+```js
+const result = await this.$platform.shareUrl(url, text)
+```
+
+On MAX this retains the existing `WebApp.shareMaxContent({ link, text })`
+workflow: content is shared inside MAX. It is not the operating-system share
+sheet for external applications. MAX returns `shared` or `cancelled`.
+
+On Web, the adapter prefers `navigator.share()` (`shared` after resolution,
+`cancelled` for `AbortError`) and falls back to Clipboard (`copied` only after
+`writeText()` succeeds). Other failures reject the Promise.
+
+No external/system-share method is introduced because the current repository
+does not establish that consuming applications need that separate workflow.
+
+## Prepared-message sharing
+
+MAX expects the `mid` value returned by Bot API `POST /messages` plus a
+`chatType` of `DIALOG` or `CHAT`:
+
+```js
+await this.$platform.sharePreparedMessage({
+  messageId: maxMessageMid,
+  chatType: 'DIALOG'
+})
+```
+
+It returns `shared` or `cancelled`. Keep bot tokens and Bot API calls on the
+backend. The Telegram legacy method continues to accept a PreparedInlineMessage
+ID and is not interchangeable with MAX `mid`.
+
+## Errors and user activation
+
+Promise-based public methods always return Promises, including validation
+errors and synchronous native-SDK exceptions. Unknown or missing documented
+SDK result statuses reject with `PlatformProtocolError`. The original
+synchronous SDK exception is preserved.
+
+MAX native methods are still called synchronously within the original method
+call stack. Do not defer those calls with `.then()`, `queueMicrotask()`, or a
+timer when invoking them from a user gesture.
+
+For BackButton lifecycle integration, see
+[`examples/backButtonIntegration.js`](../examples/backButtonIntegration.js).
