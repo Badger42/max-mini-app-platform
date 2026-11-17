@@ -1,8 +1,15 @@
 import { requireHttpsUrl, requireFileName } from './adapterUtils.js'
 
+const DEFAULT_REVOKE_DELAY_MS = 30000
+const VALID_CREDENTIALS = new Set(['omit', 'same-origin', 'include'])
+
 /**
  * Browser fallback: fetch -> Blob -> object URL -> anchor click.
  * The returned status means the download was requested, not completed.
+ *
+ * The object URL is revoked after 30 seconds by default. This gives the browser
+ * a short window to start consuming the download while avoiding a long-lived
+ * Blob URL. Failed attempts revoke it immediately.
  *
  * @param {string} url
  * @param {string} fileName
@@ -12,50 +19,101 @@ import { requireHttpsUrl, requireFileName } from './adapterUtils.js'
 export default async function downloadBlob(
   url,
   fileName,
-  { credentials = 'same-origin', revokeDelayMs = 30000 } = {}
+  { credentials = 'same-origin', revokeDelayMs = DEFAULT_REVOKE_DELAY_MS } = {}
 ) {
   const validUrl = requireHttpsUrl(url, 'downloadFile')
   const validFileName = requireFileName(fileName)
 
+  if (!VALID_CREDENTIALS.has(credentials)) {
+    throw new TypeError('credentials must be omit, same-origin or include')
+  }
   if (!Number.isFinite(revokeDelayMs) || revokeDelayMs < 0) {
     throw new TypeError('revokeDelayMs must be a non-negative finite number')
   }
-
   if (typeof fetch !== 'function') {
     throw new Error('Fetch API is not available in this runtime')
   }
-
   if (typeof document === 'undefined' || !document.body ||
-      typeof URL.createObjectURL !== 'function') {
+      typeof URL.createObjectURL !== 'function' ||
+      typeof URL.revokeObjectURL !== 'function') {
     throw new Error('Blob downloads are not available in this runtime')
   }
 
-  const response = await fetch(validUrl, { credentials })
+  let response
+  try {
+    response = await fetch(validUrl, { credentials })
+  } catch (error) {
+    throw new Error('Download request failed; check the network and the server CORS policy', {
+      cause: error
+    })
+  }
 
+  if (response.type === 'opaque' || response.type === 'opaqueredirect') {
+    throw new Error('The response is opaque; check the server CORS configuration')
+  }
   if (!response.ok) {
     throw new Error(`Download failed: HTTP ${response.status}`)
   }
 
-  if (response.type === 'opaque') {
-    throw new Error('The response is opaque; check the server CORS configuration')
-  }
-
   const blob = await response.blob()
   const objectUrl = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = objectUrl
-  link.download = validFileName
-  link.style.display = 'none'
+  /** @type {HTMLAnchorElement|null} */
+  let link = null
+  let revokeScheduled = false
+  /** @type {unknown} */
+  let operationError = null
 
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
+  try {
+    link = /** @type {HTMLAnchorElement} */ (document.createElement('a'))
+    link.href = objectUrl
+    link.download = validFileName
+    link.style.display = 'none'
 
-  // Do not revoke synchronously: some browsers need time to start the download.
-  const schedule = typeof window !== 'undefined' && window.setTimeout
-    ? window.setTimeout.bind(window)
-    : setTimeout
-  schedule(() => URL.revokeObjectURL(objectUrl), revokeDelayMs)
+    document.body.appendChild(link)
+    link.click()
 
-  return { status: 'requested' }
+    const schedule = typeof window !== 'undefined' && typeof window.setTimeout === 'function'
+      ? window.setTimeout.bind(window)
+      : setTimeout
+
+    schedule(() => {
+      try { URL.revokeObjectURL(objectUrl) } catch { /* Best-effort browser resource cleanup. */ }
+    }, revokeDelayMs)
+    revokeScheduled = true
+
+    return { status: 'requested' }
+  } catch (error) {
+    operationError = error
+    throw error
+  } finally {
+    let cleanupError = null
+
+    if (link) {
+      try {
+        if (link.parentNode) link.parentNode.removeChild(link)
+      } catch (error) {
+        cleanupError = error
+      }
+
+      // Try the element-level removal API if the parent refused removal.
+      if (link.parentNode && typeof link.remove === 'function') {
+        try {
+          link.remove()
+          cleanupError = null
+        } catch (error) {
+          cleanupError ||= error
+        }
+      }
+    }
+
+    if (!revokeScheduled) {
+      try { URL.revokeObjectURL(objectUrl) } catch (error) {
+        cleanupError ||= error
+      }
+    }
+
+    if (operationError === null && cleanupError !== null) {
+      throw cleanupError
+    }
+  }
 }

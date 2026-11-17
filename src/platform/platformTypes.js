@@ -1,12 +1,9 @@
 /**
- * Domain types for the public Web, MAX and Telegram adapter contract.
- *
- * `null` represents regular Web. MAX and Telegram are first-class supported
- * host platforms; neither is a legacy-only compatibility path.
+ * Domain types for the Web, MAX and Telegram adapter contracts.
  *
  * @typedef {null|'max'|'telegram'} BridgeType
- * @typedef {'web'|'max'|'telegram'} LaunchContext
- * @typedef {'detected'|'not-detected'|'invalid'} LaunchDetectionStatus
+ * @typedef {'web'|'max'|'telegram'} LaunchContextType
+ * @typedef {'valid'|'absent'|'invalid'|'conflicting'} LaunchDetectionStatus
  * @typedef {'ios'|'android'|'desktop'|'web'} MaxClientPlatform
  * @typedef {'DIALOG'|'CHAT'} MaxChatType
  * @typedef {'downloading'|'cancelled'} MaxDownloadPlatformStatus
@@ -15,39 +12,59 @@
  */
 
 /**
- * A normalized launch-detection outcome. This is a domain result shape; the
- * platform-specific parsers below intentionally retain their own SDK fields.
- * @typedef {Object} LaunchDetectionResult
- * @property {LaunchContext} context
+ * Sanitized launch context. Raw MAX WebAppData and Telegram init data are never
+ * exposed here and this object must never be used as an authentication result.
+ * @typedef {Object} LaunchContext
+ * @property {LaunchContextType} type
+ * @property {{platform: string|null, version: string|null}|null} launch
+ * @property {{status: LaunchDetectionStatus, reason: string|null}} detection
+ */
+
+/** @typedef {Object} LaunchDetectionResult
+ * @property {LaunchContextType} context
  * @property {LaunchDetectionStatus} status
- *
- * @typedef {Object} MaxLaunchParseResult
- * @property {LaunchDetectionStatus} status
+ */
+
+/** @typedef {Object} MaxLaunchParseResult
+ * @property {'detected'|'not-detected'|'invalid'} status
  * @property {boolean} isMaxLaunch
  * @property {MaxClientPlatform|null} platform
  * @property {string|null} version
- * @property {boolean} invalid Duplicate protocol keys were found.
- *
- * @typedef {Object} TelegramLaunchParseResult
+ * @property {boolean} invalid
+ */
+
+/** @typedef {Object} TelegramLaunchParseResult
  * @property {boolean} isTelegramLaunch
  * @property {string|null} platform
  * @property {string|null} version
- * @property {boolean} invalid Duplicate protocol keys were found.
+ * @property {boolean} invalid
  */
 
-/** @typedef {Object} DownloadOptions
- * @property {RequestCredentials} [credentials]
- * @property {number} [revokeDelayMs]
+/** @typedef {{credentials?: RequestCredentials, revokeDelayMs?: number} & Record<string, unknown>} DownloadOptions */
+
+/**
+ * Injected service contract. The service owns HTTP client configuration,
+ * credentials, CORS, Blob saving and application-specific URL handling.
+ * @callback DownloadService
+ * @param {string} url
+ * @param {string} fileName
+ * @param {Record<string, unknown>} options
+ * @returns {unknown|Promise<unknown>}
+ */
+
+/** @typedef {Object} DownloadServices
+ * @property {DownloadService} [downloadFile]
  */
 
 /** @typedef {Object} PlatformAdapterOptions
  * @property {DownloadOptions} [downloadOptions]
+ * @property {DownloadServices} [services]
+ * @property {LaunchContext|null} [launchContext]
  */
 
 /**
  * MAX's text/link and prepared-message forms are mutually exclusive according
  * to the MAX Bridge API.
- *
  * @typedef {{text?: string, link: string, mid?: never, chatType?: never}} MaxTextShareRequest
  * @typedef {{mid: string, chatType: MaxChatType, link?: never, text?: never}} MaxPreparedShareRequest
  * @typedef {MaxTextShareRequest|MaxPreparedShareRequest} MaxShareContentRequest
@@ -62,7 +79,7 @@
 /** @typedef {{status: MaxDownloadPlatformStatus}} MaxDownloadResponse */
 
 /**
- * Native MAX back button methods used by the adapter.
+ * Native MAX/Telegram BackButton methods used by the adapters.
  * @typedef {Object} NativeBackButton
  * @property {() => void} show
  * @property {() => void} hide
@@ -71,8 +88,8 @@
  */
 
 /**
- * Minimal, deliberately structural view of the documented MAX WebApp surface
- * consumed by this package. Optional members are capability-detected.
+ * Minimal structural view of the MAX WebApp surface consumed by this package.
+ * Optional members are capability-detected.
  * @typedef {Object} MaxBridge
  * @property {MaxClientPlatform} [platform]
  * @property {string} [version]
@@ -131,13 +148,9 @@
  * @property {'requested'|'unavailable'} status
  */
 
-/**
- * Telegram's share composer can be opened through the host link API or a
- * browser fallback; those outcomes are distinct from a completed share.
- * @typedef {Object} ShareUrlResult
+/** @typedef {Object} ShareUrlResult
  * @property {'shared'|'cancelled'|'copied'|'opened'|'requested'|'unavailable'} status
  */
-
 /** @typedef {Object} PreparedMessageResult
  * @property {'shared'|'cancelled'} status
  */
@@ -146,7 +159,7 @@
  * @property {string|null} clientPlatform Host-reported platform.
  * @property {string|null} clientVersion Host-reported client version.
  * @property {string|null} deviceName Host-reported device name, if available.
- * @property {{userAgent: string|null}} [browser] Browser diagnostics.
+ * @property {{userAgent: string|null}} [browser]
  * @property {string|null} [platform]
  * @property {string|null} [version]
  */
@@ -159,7 +172,7 @@
  */
 
 /**
- * Public service surface shared by platform adapters.
+ * Common methods exposed by every adapter.
  * @typedef {Object} PlatformServices
  * @property {BackButtonService} backButton
  * @property {() => void|Promise<void>} enableClosingConfirmation
@@ -172,6 +185,7 @@
  *   bridgeType: BridgeType,
  *   bridgeAvailable: boolean,
  *   bridgeError: Error|null,
+ *   launchContext: LaunchContext|null,
  *   runtime: PlatformRuntime,
  *   capabilities: PlatformCapabilities,
  *   downloadFile: (url: string, fileName: string, options?: DownloadOptions) => Promise<DownloadResult>,
@@ -182,13 +196,14 @@
  * }} PlatformAdapter
  */
 
-/**
- * Options accepted by the platform selector.
- * @typedef {Object} CreatePlatformOptions
+/** @typedef {Object} CreatePlatformOptions
  * @property {BridgeType|'web'} [bridgeType]
  * @property {MaxBridge|TelegramBridge|null} [bridge]
  * @property {Error|string|null} [error]
+ * @property {Error|string|null} [bridgeError]
+ * @property {LaunchContext|null} [launchContext]
  * @property {DownloadOptions} [downloadOptions]
+ * @property {DownloadServices} [services]
  */
 
 export {}

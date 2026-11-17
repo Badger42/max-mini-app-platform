@@ -2,10 +2,9 @@ import detectMaxLaunch from './detectMaxLaunch.js'
 import detectTelegramLaunch from './detectTelegramLaunch.js'
 
 /**
- * Detect the launch environment before Vue Router is created or mounted.
- * Telegram remains a supported platform route until the previous stage is
- * completed; the target platform model is Web + MAX.
- * @returns {import('./platformTypes.js').LaunchContext}
+ * Legacy convenience detector returning only the protocol name. New bootstrap
+ * code should use detectLaunchContext() to retain validation diagnostics.
+ * @returns {import('./platformTypes.js').LaunchContextType}
  */
 export default function detectPlatform() {
   const isMax = detectMaxLaunch()

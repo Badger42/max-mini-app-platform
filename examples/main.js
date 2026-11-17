@@ -1,19 +1,20 @@
 // Example bootstrap for Vue CLI + Vue 3.
-// Merge this flow into your existing src/main.js and keep your existing
-// Router, store, Axios and other plugin registrations before mount().
+// Merge this flow into the consuming application's src/main.js and preserve
+// its existing Router/store/Axios registrations before mount().
 
 import { createApp } from 'vue'
 import App from '../src/App.vue'
 
-import detectPlatform from '../src/platform/detectPlatform.js'
+import detectLaunchContext from '../src/platform/detectLaunchContext.js'
 import loadMaxBridge from '../src/platform/loadMaxBridge.js'
 import loadTelegramBridge from '../src/platform/loadTelegramBridge.js'
 import createPlatform from '../src/platform/createPlatform.js'
 import PlatformPlugin from '../src/plugins/platform.js'
 
-async function bootstrap() {
-  const detectedPlatform = detectPlatform()
-  const bridgeType = detectedPlatform === 'web' ? null : detectedPlatform
+/** @param {import('../src/platform/platformTypes.js').DownloadServices} [services] */
+async function bootstrap(services = {}) {
+  const launchContext = detectLaunchContext()
+  const bridgeType = launchContext.type === 'web' ? null : launchContext.type
 
   /** @type {import('../src/platform/platformTypes.js').MaxBridge|import('../src/platform/platformTypes.js').TelegramBridge|null} */
   let bridge = null
@@ -36,10 +37,14 @@ async function bootstrap() {
     }
   }
 
+  // Supply the consuming application's Axios/Blob download operation here.
+  // It receives (url, fileName, options) and owns credentials/CORS/saving.
   const platform = createPlatform({
+    launchContext,
     bridgeType,
     bridge,
-    error: bridgeError
+    bridgeError,
+    services
   })
 
   const app = createApp(App)

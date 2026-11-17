@@ -3,14 +3,18 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "test:platform": "node --test tests/platform*.test.mjs",
-    "typecheck": "tsc -p tsconfig.json"
+    "test:platform": "node --test tests/platform*.test.mjs tests/stage4-regressions.test.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint src/platform src/plugins examples tests type-tests",
+    "lint:fix": "npm run lint -- --fix",
+    "check": "npm run lint && npm run typecheck && npm test"
   },
   "devDependencies": {
+    "eslint": "10.15.0",
     "typescript": "^5.8.3"
   }
 }

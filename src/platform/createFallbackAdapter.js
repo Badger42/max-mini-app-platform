@@ -2,7 +2,8 @@ import createWebAdapter from './webAdapter.js'
 
 /**
  * Shared implementation for a recognized host whose SDK failed to load.
- * The Telegram branch is kept as a first-class platform.
+ * It reuses the Web adapter for supported browser operations and explicitly
+ * disables every host-native capability.
  *
  * @param {'max'|'telegram'} bridgeType
  * @param {Error|string|null} error
@@ -12,13 +13,13 @@ import createWebAdapter from './webAdapter.js'
 export default function createFallbackAdapter(
   bridgeType,
   error,
-  { downloadOptions = {} } = {}
+  { downloadOptions = {}, services = {}, launchContext = null } = {}
 ) {
-  if (!['max', 'telegram'].includes(bridgeType)) {
+  if (bridgeType !== 'max' && bridgeType !== 'telegram') {
     throw new TypeError(`Unsupported fallback bridgeType: ${bridgeType}`)
   }
 
-  const web = createWebAdapter({ downloadOptions })
+  const web = createWebAdapter({ downloadOptions, services, launchContext })
 
   return {
     ...web,
@@ -27,6 +28,7 @@ export default function createFallbackAdapter(
     bridgeError: error instanceof Error
       ? error
       : new Error(error ? String(error) : `${bridgeType} SDK is unavailable`),
+    launchContext,
     capabilities: {
       ...web.capabilities,
       nativeDownload: false,

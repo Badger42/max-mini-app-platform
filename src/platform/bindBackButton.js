@@ -1,7 +1,10 @@
+/** @type {WeakMap<object, {dispose: () => void}>} */
+const activeBindingsByRouter = new WeakMap()
+
 /**
  * @typedef {Object} BackButtonRouter
- * @property {() => void} back
- * @property {(handler: () => void) => (() => void)|void} afterEach
+ * @property {() => void|Promise<void>} back
+ * @property {(handler: (...args: unknown[]) => void) => (() => void)|void} afterEach
  * @property {(handler: (error: unknown) => void) => (() => void)|void} [onError]
  */
 
@@ -18,8 +21,9 @@
  */
 
 /**
- * Connect one native BackButton subscription to the application's modal manager
- * and Vue Router. The helper does not depend on a specific modal library.
+ * Connect the single native BackButton subscription to a modal manager and
+ * Router. A second binding for the same native BackButton replaces the first.
+ * The helper deliberately knows nothing about a specific modal library.
  *
  * @param {BindBackButtonOptions} options
  * @returns {{refresh: () => void, dispose: () => void}}
@@ -39,25 +43,56 @@ export default function bindBackButton({
   }
 }) {
   if (!platform || !platform.backButton || !router ||
+      (typeof router !== 'object' && typeof router !== 'function') ||
+      typeof router.back !== 'function' ||
+      typeof router.afterEach !== 'function' ||
       typeof hasOpenModal !== 'function' ||
       typeof closeTopModal !== 'function' ||
       typeof canGoBack !== 'function') {
     throw new TypeError('platform, router and modal/navigation callbacks are required')
   }
 
+  if (!Number.isFinite(navigationUnlockTimeoutMs) || navigationUnlockTimeoutMs < 0) {
+    throw new TypeError('navigationUnlockTimeoutMs must be a non-negative finite number')
+  }
+
+  const backButton = platform.backButton
+  activeBindingsByRouter.get(router)?.dispose()
+
+  if (!backButton.supported) {
+    return { refresh() {}, dispose() {} }
+  }
+
   let disposed = false
   let handlingBack = false
   let navigationPending = false
-  /** @type {number|null} */
+  /** @type {ReturnType<typeof setTimeout>|null} */
   let navigationTimer = null
+  /** @type {Array<() => void>} */
+  const unsubscribers = []
+
+  /** @param {unknown} error */
+  const reportError = error => {
+    if (disposed) return
+    try {
+      onError(error)
+    } catch {
+      // An application error reporter must not break the BackButton lifecycle.
+    }
+  }
 
   const refresh = () => {
-    if (disposed || !platform.backButton.supported) return
-    if (hasOpenModal() || canGoBack()) platform.backButton.show()
-    else platform.backButton.hide()
+    if (disposed || !backButton.supported) return
+    try {
+      if (hasOpenModal() || canGoBack()) backButton.show()
+      else backButton.hide()
+    } catch (error) {
+      reportError(error)
+    }
   }
 
   const releaseNavigation = () => {
+    if (disposed) return
     navigationPending = false
     if (navigationTimer !== null) {
       clearTimeout(navigationTimer)
@@ -78,9 +113,22 @@ export default function bindBackButton({
 
       if (canGoBack()) {
         navigationPending = true
-        navigationTimer = setTimeout(releaseNavigation, navigationUnlockTimeoutMs)
         try {
-          router.back()
+          navigationTimer = setTimeout(releaseNavigation, navigationUnlockTimeoutMs)
+        } catch (error) {
+          releaseNavigation()
+          throw error
+        }
+
+        try {
+          const navigation = router.back()
+          if (navigation && typeof navigation.then === 'function') {
+            Promise.resolve(navigation).catch(error => {
+              if (disposed) return
+              releaseNavigation()
+              reportError(error)
+            })
+          }
         } catch (error) {
           releaseNavigation()
           throw error
@@ -88,40 +136,66 @@ export default function bindBackButton({
         return
       }
 
-      platform.backButton.hide()
+      backButton.hide()
     } catch (error) {
-      onError(error)
+      reportError(error)
     } finally {
       handlingBack = false
-      if (!navigationPending) refresh()
+      if (!disposed && !navigationPending) refresh()
     }
   }
 
-  const unsubscribeBack = platform.backButton.onClick(handleBack)
-  const unsubscribeRoute = router.afterEach(releaseNavigation)
-  const unsubscribeRouterError = typeof router.onError === 'function'
-    ? router.onError(releaseNavigation)
-    : null
-  const unsubscribeModal = typeof subscribeModalChanges === 'function'
-    ? subscribeModalChanges(refresh)
-    : null
+  /** @param {unknown} unsubscribe */
+  const addUnsubscriber = unsubscribe => {
+    if (typeof unsubscribe === 'function') {
+      unsubscribers.push(/** @type {() => void} */ (unsubscribe))
+    }
+  }
 
+  try {
+    addUnsubscriber(backButton.onClick(handleBack))
+    addUnsubscriber(router.afterEach(releaseNavigation))
+    if (typeof router.onError === 'function') {
+      addUnsubscriber(router.onError(releaseNavigation))
+    }
+    if (typeof subscribeModalChanges === 'function') {
+      addUnsubscriber(subscribeModalChanges(refresh))
+    }
+  } catch (error) {
+    for (const unsubscribe of unsubscribers.splice(0)) {
+      try { unsubscribe() } catch { /* Continue cleaning up partial registration. */ }
+    }
+    reportError(error)
+    throw error
+  }
+
+  /** @type {{dispose: () => void}|undefined} */
+  let binding
+  const dispose = () => {
+    if (disposed) return
+    disposed = true
+
+    if (navigationTimer !== null) {
+      clearTimeout(navigationTimer)
+      navigationTimer = null
+    }
+
+    for (const unsubscribe of unsubscribers.splice(0)) {
+      try { unsubscribe() } catch { /* All remaining subscriptions must still be released. */ }
+    }
+
+    if (backButton.supported) {
+      try { backButton.hide() } catch { /* Disposal must remain idempotent. */ }
+    }
+
+    if (activeBindingsByRouter.get(router) === binding) {
+      activeBindingsByRouter.delete(router)
+    }
+  }
+
+  binding = { dispose }
+  activeBindingsByRouter.set(router, binding)
   refresh()
 
-  return {
-    refresh,
-    dispose() {
-      if (disposed) return
-      disposed = true
-      if (typeof unsubscribeBack === 'function') unsubscribeBack()
-      if (typeof unsubscribeRoute === 'function') unsubscribeRoute()
-      if (typeof unsubscribeRouterError === 'function') unsubscribeRouterError()
-      if (typeof unsubscribeModal === 'function') unsubscribeModal()
-      if (navigationTimer !== null) {
-        clearTimeout(navigationTimer)
-        navigationTimer = null
-      }
-      platform.backButton.hide()
-    }
-  }
+  return { refresh, dispose }
 }

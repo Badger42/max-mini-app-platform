@@ -1,4 +1,4 @@
-import downloadBlob from './downloadBlob.js'
+import createWebAdapter from './webAdapter.js'
 import {
   requireHttpsUrl,
   requireFileName,
@@ -11,9 +11,7 @@ import {
 
 /** @param {string} methodName @returns {Promise<never>} */
 function unavailable(methodName) {
-  return Promise.reject(
-    new Error(`Telegram ${methodName} is not available in this client version`)
-  )
+  return Promise.reject(new Error(`Telegram ${methodName} is not available in this client version`))
 }
 
 /**
@@ -23,28 +21,19 @@ function unavailable(methodName) {
  */
 function supportsVersion(webApp, requiredVersion) {
   if (typeof webApp.isVersionAtLeast === 'function') {
-    try {
-      return Boolean(webApp.isVersionAtLeast(requiredVersion))
-    } catch {
-      return false
-    }
+    try { return Boolean(webApp.isVersionAtLeast(requiredVersion)) } catch { return false }
   }
 
   const current = String(webApp.version || '').split('.')
   const required = requiredVersion.split('.')
-
-  if (!current.length || current.some(part => !/^\d+$/.test(part))) {
-    return false
-  }
+  if (!current.length || current.some(part => !/^\d+$/.test(part))) return false
 
   for (let index = 0; index < required.length; index += 1) {
     const currentPart = Number(current[index] || 0)
     const requiredPart = Number(required[index] || 0)
-
     if (currentPart > requiredPart) return true
     if (currentPart < requiredPart) return false
   }
-
   return true
 }
 
@@ -55,14 +44,18 @@ function supportsVersion(webApp, requiredVersion) {
  * @param {import('./platformTypes.js').PlatformAdapterOptions} [options]
  * @returns {import('./platformTypes.js').PlatformAdapter}
  */
-export default function createTelegramAdapter(webApp, { downloadOptions = {} } = {}) {
+export default function createTelegramAdapter(webApp, {
+  downloadOptions = {},
+  services = {},
+  launchContext = null
+} = {}) {
   if (!webApp || typeof webApp !== 'object') {
     throw new TypeError('A valid window.Telegram.WebApp object is required')
   }
 
   const backButton = createBackButton(webApp.BackButton)
   const closingConfirmation = createClosingConfirmation(webApp)
-
+  const webFallback = createWebAdapter({ downloadOptions, services, launchContext })
   const supportsBotApi8 = supportsVersion(webApp, '8.0')
   const nativeDownload = webApp.downloadFile
   const nativeShareMessage = webApp.shareMessage
@@ -80,6 +73,7 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
     bridgeType: 'telegram',
     bridgeAvailable: true,
     bridgeError: null,
+    launchContext,
 
     runtime: {
       clientPlatform,
@@ -101,42 +95,39 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
     },
 
     /**
-     * Telegram's callback indicates whether the user accepted the prompt;
-     * it does not report download completion.
+     * Telegram's callback indicates whether the user accepted the prompt; it
+     * does not report download completion. Fallbacks use the injected service
+     * before Fetch/Blob.
      * @param {string} url
      * @param {string} fileName
      * @param {import('./platformTypes.js').DownloadOptions} [options]
      * @returns {Promise<import('./platformTypes.js').DownloadResult>}
      */
     downloadFile(url, fileName, options = {}) {
-      let validUrl
       let validFileName
-      try {
-        validUrl = requireHttpsUrl(url, 'downloadFile')
-        validFileName = requireFileName(fileName)
-      } catch (error) {
+      try { validFileName = requireFileName(fileName) } catch (error) {
         return Promise.reject(error)
       }
 
-      if (hasNativeDownload) {
-        // Constructing this Promise calls downloadFile synchronously.
-        return new Promise((resolve, reject) => {
-          try {
-            nativeDownload.call(webApp,
-              { url: validUrl, file_name: validFileName },
-              accepted => resolve(normalizeTelegramDownloadResult({
-                status: accepted ? 'accepted' : 'cancelled'
-              }))
-            )
-          } catch (error) {
-            reject(error)
-          }
-        })
+      if (!hasNativeDownload) return webFallback.downloadFile(url, validFileName, options)
+
+      let validUrl
+      try { validUrl = requireHttpsUrl(url, 'downloadFile') } catch (error) {
+        return Promise.reject(error)
       }
 
-      return downloadBlob(validUrl, validFileName, {
-        ...downloadOptions,
-        ...options
+      // Constructing this Promise calls downloadFile synchronously.
+      return new Promise((resolve, reject) => {
+        try {
+          nativeDownload.call(webApp,
+            { url: validUrl, file_name: validFileName },
+            accepted => resolve(normalizeTelegramDownloadResult({
+              status: accepted ? 'accepted' : 'cancelled'
+            }))
+          )
+        } catch (error) {
+          reject(error)
+        }
       })
     },
 
@@ -160,17 +151,10 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
       return openInBrowser(validUrl)
     },
 
-    /**
-     * Opens Telegram's share composer. `opened` is not confirmation of sending.
-     * @param {string} url
-     * @param {string} [text]
-     * @returns {Promise<import('./platformTypes.js').ShareUrlResult>}
-     */
+    /** @param {string} url @param {string} [text] */
     shareUrl(url, text = '') {
       let validUrl
-      try {
-        validUrl = requireHttpsUrl(url, 'shareUrl')
-      } catch (error) {
+      try { validUrl = requireHttpsUrl(url, 'shareUrl') } catch (error) {
         return Promise.reject(error)
       }
 
@@ -179,29 +163,20 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
       if (text) shareLink.searchParams.set('text', String(text))
 
       if (hasPlatformLinks) {
-        try {
-          nativeOpenTelegramLink.call(webApp, shareLink.toString())
-        } catch (error) {
+        try { nativeOpenTelegramLink.call(webApp, shareLink.toString()) } catch (error) {
           return Promise.reject(error)
         }
         return Promise.resolve({ status: 'opened' })
       }
-
       return Promise.resolve(openInBrowser(shareLink.toString()))
     },
 
-    /**
-     * @param {import('./platformTypes.js').PreparedMessageInput} [params]
-     * @returns {Promise<import('./platformTypes.js').PreparedMessageResult>}
-     */
+    /** @param {import('./platformTypes.js').PreparedMessageInput} [params] */
     sharePreparedMessage(params) {
       const messageId = params && params.messageId
       if (!messageId || typeof messageId !== 'string') {
-        return Promise.reject(
-          new TypeError('A Telegram prepared inline message ID is required')
-        )
+        return Promise.reject(new TypeError('A Telegram prepared inline message ID is required'))
       }
-
       if (!hasShareMessage) return unavailable('shareMessage')
 
       return new Promise((resolve, reject) => {
@@ -216,12 +191,8 @@ export default function createTelegramAdapter(webApp, { downloadOptions = {} } =
     },
 
     backButton,
-    enableClosingConfirmation() {
-      return closingConfirmation.enable()
-    },
-    disableClosingConfirmation() {
-      return closingConfirmation.disable()
-    },
+    enableClosingConfirmation() { return closingConfirmation.enable() },
+    disableClosingConfirmation() { return closingConfirmation.disable() },
     ready() {
       if (typeof webApp.ready === 'function') return webApp.ready()
     }
