@@ -28,6 +28,7 @@ export default function createWebAdapter({
     bridgeAvailable: false,
     bridgeError: null,
     launchContext,
+    launchParameters: Object.freeze({ startParam: null }),
 
     runtime: {
       clientPlatform: null,

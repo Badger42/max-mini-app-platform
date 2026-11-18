@@ -1,5 +1,6 @@
 /** @type {WeakMap<object, {dispose: () => void}>} */
 const activeBindingsByRouter = new WeakMap()
+const activeBindingsByBackButton = new WeakMap()
 
 /**
  * @typedef {Object} BackButtonRouter
@@ -58,6 +59,7 @@ export default function bindBackButton({
 
   const backButton = platform.backButton
   activeBindingsByRouter.get(router)?.dispose()
+  activeBindingsByBackButton.get(backButton)?.dispose()
 
   if (!backButton.supported) {
     return { refresh() {}, dispose() {} }
@@ -191,10 +193,14 @@ export default function bindBackButton({
     if (activeBindingsByRouter.get(router) === binding) {
       activeBindingsByRouter.delete(router)
     }
+    if (activeBindingsByBackButton.get(backButton) === binding) {
+      activeBindingsByBackButton.delete(backButton)
+    }
   }
 
   binding = { dispose }
   activeBindingsByRouter.set(router, binding)
+  activeBindingsByBackButton.set(backButton, binding)
   refresh()
 
   return { refresh, dispose }

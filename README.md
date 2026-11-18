@@ -17,6 +17,22 @@ authentication. No MAX or Telegram authentication is implemented.
 4. Use `this.$platform` in Options API components.
 5. Test regular Web, MAX Android/iOS/Desktop and Telegram Android/iOS/Desktop.
 
+## Launch parameters and application selection
+
+After the selected SDK has loaded, the adapter exposes the normalized
+`this.$platform.launchParameters.startParam` value. For MAX it comes from
+`window.WebApp.initDataUnsafe.start_param`; Telegram uses the corresponding
+`initDataUnsafe.start_param`. Web and SDK-fallback adapters return `null`.
+
+The value is available after `createPlatform()` but before `createApp()`. The
+bootstrap example therefore accepts a `resolveApp(launchParameters)` callback
+that can select the root component and its Router/Store plugins before mounting.
+See [docs/launch-parameters.md](docs/launch-parameters.md).
+
+Treat `startParam` as untrusted routing context only. It must not grant access to
+users, records, files or backend operations. Validate resources through the
+existing backend. When the SDK fails to load, the fallback reports `null`.
+
 ## Runtime detection and conditional SDK loading
 
 MAX launch parameters (`WebAppData`, `WebAppPlatform`, `WebAppVersion`) and

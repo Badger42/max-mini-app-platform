@@ -2,6 +2,7 @@
  * Domain types for the Web, MAX and Telegram adapter contracts.
  *
  * @typedef {null|'max'|'telegram'} BridgeType
+ * @typedef {{startParam: string|null}} LaunchParameters
  * @typedef {'web'|'max'|'telegram'} LaunchContextType
  * @typedef {'valid'|'absent'|'invalid'|'conflicting'} LaunchDetectionStatus
  * @typedef {'ios'|'android'|'desktop'|'web'} MaxClientPlatform
@@ -93,6 +94,7 @@
  * @typedef {Object} MaxBridge
  * @property {MaxClientPlatform} [platform]
  * @property {string} [version]
+ * @property {{start_param?: string}} [initDataUnsafe]
  * @property {string} [deviceName]
  * @property {(url: string, fileName: string) => Promise<MaxDownloadResponse>} [downloadFile]
  * @property {(url: string) => void} [openLink]
@@ -108,6 +110,7 @@
  * @typedef {Object} TelegramBridge
  * @property {string} [platform]
  * @property {string} [version]
+ * @property {{start_param?: string}} [initDataUnsafe]
  * @property {NativeBackButton} [BackButton]
  * @property {(params: {url: string, file_name: string}, callback: (accepted: boolean) => void) => void} [downloadFile]
  * @property {(messageId: string, callback: (sent: boolean) => void) => void} [shareMessage]
@@ -186,6 +189,7 @@
  *   bridgeAvailable: boolean,
  *   bridgeError: Error|null,
  *   launchContext: LaunchContext|null,
+ *   launchParameters: LaunchParameters,
  *   runtime: PlatformRuntime,
  *   capabilities: PlatformCapabilities,
  *   downloadFile: (url: string, fileName: string, options?: DownloadOptions) => Promise<DownloadResult>,

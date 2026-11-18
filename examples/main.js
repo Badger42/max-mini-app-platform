@@ -1,9 +1,9 @@
 // Example bootstrap for Vue CLI + Vue 3.
 // Merge this flow into the consuming application's src/main.js and preserve
-// its existing Router/store/Axios registrations before mount().
+// its existing services. Resolve the root app before createApp() so startapp can
+// choose the component, Router and Store without changing window.location.
 
 import { createApp } from 'vue'
-import App from '../src/App.vue'
 
 import detectLaunchContext from '../src/platform/detectLaunchContext.js'
 import loadMaxBridge from '../src/platform/loadMaxBridge.js'
@@ -11,8 +11,29 @@ import loadTelegramBridge from '../src/platform/loadTelegramBridge.js'
 import createPlatform from '../src/platform/createPlatform.js'
 import PlatformPlugin from '../src/plugins/platform.js'
 
-/** @param {import('../src/platform/platformTypes.js').DownloadServices} [services] */
-async function bootstrap(services = {}) {
+/**
+ * @typedef {{component: unknown, plugins?: unknown[]}} ResolvedApplication
+ * @typedef {Object} BootstrapOptions
+ * @property {(parameters: import('../src/platform/platformTypes.js').LaunchParameters) => ResolvedApplication|Promise<ResolvedApplication>} resolveApp
+ * @property {unknown[]} [plugins] Plugins shared by every app variant (for example, a common diagnostics plugin).
+ * @property {import('../src/platform/platformTypes.js').DownloadServices} [services]
+ * @property {string} [mountTarget]
+ */
+
+/**
+ * @param {Partial<BootstrapOptions>} [options]
+ * @returns {Promise<{app: unknown, platform: import('../src/platform/platformTypes.js').PlatformAdapter}>}
+ */
+export async function bootstrap({
+  resolveApp,
+  plugins = [],
+  services = {},
+  mountTarget = '#app'
+} = {}) {
+  if (typeof resolveApp !== 'function') {
+    throw new TypeError('resolveApp is required and must return { component, plugins? }')
+  }
+
   const launchContext = detectLaunchContext()
   const bridgeType = launchContext.type === 'web' ? null : launchContext.type
 
@@ -37,8 +58,6 @@ async function bootstrap(services = {}) {
     }
   }
 
-  // Supply the consuming application's Axios/Blob download operation here.
-  // It receives (url, fileName, options) and owns credentials/CORS/saving.
   const platform = createPlatform({
     launchContext,
     bridgeType,
@@ -47,17 +66,20 @@ async function bootstrap(services = {}) {
     services
   })
 
-  const app = createApp(App)
+  // This runs after launch data is available and before createApp()/mount().
+  const selectedApp = await resolveApp(platform.launchParameters)
+  if (!selectedApp || !selectedApp.component) {
+    throw new TypeError('resolveApp must return an object with a Vue component')
+  }
+
+  const app = createApp(/** @type {any} */ (selectedApp.component))
   app.use(PlatformPlugin, platform)
 
-  // Register existing Router/store/other plugins here, before mount().
-  // app.use(router)
-  // app.use(store)
+  for (const plugin of [...plugins, ...(selectedApp.plugins || [])]) {
+    app.use(/** @type {any} */ (plugin))
+  }
 
-  app.mount('#app')
+  app.mount(mountTarget)
   platform.ready()
+  return { app, platform }
 }
-
-bootstrap().catch(error => {
-  console.error('[app] Bootstrap failed:', error)
-})

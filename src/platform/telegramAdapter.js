@@ -6,7 +6,8 @@ import {
   canOpenInBrowser,
   createBackButton,
   createClosingConfirmation,
-  normalizeTelegramDownloadResult
+  normalizeTelegramDownloadResult,
+  readLaunchParameters
 } from './adapterUtils.js'
 
 /** @param {string} methodName @returns {Promise<never>} */
@@ -74,6 +75,7 @@ export default function createTelegramAdapter(webApp, {
     bridgeAvailable: true,
     bridgeError: null,
     launchContext,
+    launchParameters: readLaunchParameters(webApp),
 
     runtime: {
       clientPlatform,

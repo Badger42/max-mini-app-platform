@@ -262,3 +262,25 @@ export function createClosingConfirmation(bridge) {
 export function unavailable(methodName) {
   return Promise.reject(new Error(`${methodName} is not available in this runtime`))
 }
+
+
+/**
+ * Expose only the deep-link payload needed for application selection.
+ * `initDataUnsafe` is untrusted and must never be used for authentication or
+ * authorization. A missing, malformed or inaccessible value becomes null.
+ * @param {import('./platformTypes.js').MaxBridge|import('./platformTypes.js').TelegramBridge|null|undefined} bridge
+ * @returns {import('./platformTypes.js').LaunchParameters}
+ */
+export function readLaunchParameters(bridge) {
+  let startParam = null
+  try {
+    const candidate = bridge?.initDataUnsafe?.start_param
+    if (typeof candidate === 'string' && candidate.length > 0) {
+      startParam = candidate
+    }
+  } catch {
+    // A malformed bridge object must not prevent the app from mounting.
+  }
+
+  return Object.freeze({ startParam })
+}

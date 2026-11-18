@@ -8,7 +8,8 @@ import {
   createClosingConfirmation,
   normalizeMaxDownloadResult,
   normalizeMaxShareResult,
-  normalizeMaxPreparedMessageResult
+  normalizeMaxPreparedMessageResult,
+  readLaunchParameters
 } from './adapterUtils.js'
 
 /**
@@ -50,6 +51,7 @@ export default function createMaxAdapter(webApp, {
     bridgeAvailable: true,
     bridgeError: null,
     launchContext,
+    launchParameters: readLaunchParameters(webApp),
 
     runtime: {
       clientPlatform,
