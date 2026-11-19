@@ -54,10 +54,14 @@ export default function createTelegramAdapter(webApp, {
     throw new TypeError('A valid window.Telegram.WebApp object is required')
   }
 
-  const backButton = createBackButton(webApp.BackButton)
-  const closingConfirmation = createClosingConfirmation(webApp)
-  const webFallback = createWebAdapter({ downloadOptions, services, launchContext })
+  const supportsBackButton = supportsVersion(webApp, '6.1')
+  const supportsClosingConfirmation = supportsVersion(webApp, '6.2')
   const supportsBotApi8 = supportsVersion(webApp, '8.0')
+  const backButton = createBackButton(supportsBackButton ? webApp.BackButton : undefined)
+  const closingConfirmation = createClosingConfirmation(
+    supportsClosingConfirmation ? webApp : null
+  )
+  const webFallback = createWebAdapter({ downloadOptions, services, launchContext })
   const nativeDownload = webApp.downloadFile
   const nativeShareMessage = webApp.shareMessage
   const nativeOpenLink = webApp.openLink

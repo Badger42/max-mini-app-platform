@@ -100,6 +100,7 @@
  * @property {(url: string) => void} [openLink]
  * @property {(url: string) => void} [openMaxLink]
  * @property {(params: MaxShareContentRequest) => Promise<MaxShareContentResponse>} [shareMaxContent]
+ * @property {() => void} [ready]
  * @property {NativeBackButton} [BackButton]
  * @property {() => void} [enableClosingConfirmation]
  * @property {() => void} [disableClosingConfirmation]

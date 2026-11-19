@@ -263,3 +263,52 @@ test('captured MAX and Telegram SDK methods retain their receiver', async () => 
     'telegram-platform-open', 'telegram-share'
   ])
 })
+
+
+test('MAX ready forwards to the native Bridge and preserves its receiver', () => {
+  let calls = 0
+  const bridge = {
+    ready() {
+      assert.equal(this, bridge)
+      calls += 1
+    }
+  }
+
+  const max = createMaxAdapter(bridge)
+  max.ready()
+  assert.equal(calls, 1)
+})
+
+test('Telegram BackButton and closing confirmation respect their minimum SDK versions', async () => {
+  const { default: createTelegramAdapter } = await import('../src/platform/telegramAdapter.js')
+  const calls = []
+  const bridge = version => ({
+    version,
+    BackButton: {
+      show() { calls.push('show') },
+      hide() { calls.push('hide') },
+      onClick() { calls.push('onClick') },
+      offClick() { calls.push('offClick') }
+    },
+    enableClosingConfirmation() { calls.push('enableClosingConfirmation') },
+    disableClosingConfirmation() { calls.push('disableClosingConfirmation') }
+  })
+
+  const v60 = createTelegramAdapter(bridge('6.0'))
+  assert.equal(v60.capabilities.backButton, false)
+  assert.equal(v60.capabilities.closingConfirmation, false)
+  v60.backButton.show()
+  v60.enableClosingConfirmation()
+  assert.deepEqual(calls, [])
+
+  const v61 = createTelegramAdapter(bridge('6.1'))
+  assert.equal(v61.capabilities.backButton, true)
+  assert.equal(v61.capabilities.closingConfirmation, false)
+  v61.backButton.show()
+  v61.enableClosingConfirmation()
+  assert.deepEqual(calls, ['show'])
+
+  const v62 = createTelegramAdapter(bridge('6.2'))
+  assert.equal(v62.capabilities.backButton, true)
+  assert.equal(v62.capabilities.closingConfirmation, true)
+})

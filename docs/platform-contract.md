@@ -32,10 +32,10 @@ availability:
 | Capability | Meaning |
 |---|---|
 | `nativeDownload` | The selected host SDK exposes native file download in this context |
-| `backButton` | The complete native BackButton API, including unsubscription, is available |
+| `backButton` | The complete native BackButton API, including unsubscription, is available (Telegram requires client version 6.1 or later) |
 | `nativeExternalLinks` | The host SDK exposes its external-link API |
 | `nativePlatformLinks` | The host SDK exposes its host-specific deep-link API |
-| `closingConfirmation` | Both native closing-confirmation methods exist |
+| `closingConfirmation` | Both native closing-confirmation methods exist (Telegram requires client version 6.2 or later) |
 | `nativeShareUrl` | The host SDK exposes a dedicated native URL/text sharing operation |
 | `shareUrl` | URL sharing is available through native support or a documented browser/host fallback |
 | `sharePreparedMessage` | Native prepared-message sharing is available |
@@ -139,9 +139,11 @@ The platform-specific inputs are represented by separate JSDoc types.
   synchronously in the current method call stack. Do not move them into
   `.then()`, a timer or a microtask.
 - Synchronous link methods validate input and can throw synchronously.
-- `enableClosingConfirmation()`, `disableClosingConfirmation()` and `ready()`
-  preserve the return behavior of the underlying host method (or no-op) and are
-  not declared Promise-only operations.
+- `enableClosingConfirmation()` and `disableClosingConfirmation()` preserve
+  the return behavior of the underlying host method (or no-op).
+- `ready()` calls `WebApp.ready()` for MAX and `Telegram.WebApp.ready()` for
+  Telegram; Web and fallback adapters safely no-op. These operations are not
+  declared Promise-only.
 
 ## URL and SDK constraints
 

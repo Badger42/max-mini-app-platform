@@ -1,5 +1,10 @@
 import { parseMaxLaunchHash } from './detectMaxLaunch.js'
 import { parseTelegramLaunchHash } from './detectTelegramLaunch.js'
+import {
+  getEffectiveMaxLaunchHash,
+  getEffectiveTelegramLaunchHash,
+  parseLaunchHashParams
+} from './launchParameterSources.js'
 
 /**
  * The default Web context is also used by SSR and direct adapter consumers.
@@ -21,7 +26,7 @@ const TELEGRAM_LAUNCH_KEYS = ['tgWebAppData', 'tgWebAppPlatform', 'tgWebAppVersi
  * @param {string[]} keys
  */
 function hasProtocolMarker(hash, keys) {
-  const params = new URLSearchParams(String(hash || '').replace(/^#/, ''))
+  const params = parseLaunchHashParams(hash)
   return keys.some(key => params.has(key))
 }
 
@@ -35,14 +40,15 @@ const asLaunchContext = context => context
  * @returns {import('./platformTypes.js').LaunchContext}
  */
 export default function detectLaunchContext() {
-  const hash = typeof window !== 'undefined' && window.location
-    ? window.location.hash
-    : ''
+  // Resolve the same persisted sources used by the official SDKs before the
+  // platform loader runs. This remains stable after Vue Router rewrites hash.
+  const maxHash = getEffectiveMaxLaunchHash()
+  const telegramHash = getEffectiveTelegramLaunchHash()
 
-  const max = parseMaxLaunchHash(hash)
-  const telegram = parseTelegramLaunchHash(hash)
-  const hasMaxMarkers = hasProtocolMarker(hash, MAX_LAUNCH_KEYS)
-  const hasTelegramMarkers = hasProtocolMarker(hash, TELEGRAM_LAUNCH_KEYS)
+  const max = parseMaxLaunchHash(maxHash)
+  const telegram = parseTelegramLaunchHash(telegramHash)
+  const hasMaxMarkers = hasProtocolMarker(maxHash, MAX_LAUNCH_KEYS)
+  const hasTelegramMarkers = hasProtocolMarker(telegramHash, TELEGRAM_LAUNCH_KEYS)
 
   if (hasMaxMarkers && hasTelegramMarkers) {
     return asLaunchContext({

@@ -1,3 +1,8 @@
+import {
+  getEffectiveMaxLaunchHash,
+  parseLaunchHashParams
+} from './launchParameterSources.js'
+
 const MAX_PLATFORMS = new Set(['ios', 'android', 'desktop', 'web'])
 const MAX_LAUNCH_KEYS = ['WebAppData', 'WebAppPlatform', 'WebAppVersion']
 
@@ -10,8 +15,7 @@ const MAX_LAUNCH_KEYS = ['WebAppData', 'WebAppPlatform', 'WebAppVersion']
  * @returns {import('./platformTypes.js').MaxLaunchParseResult}
  */
 export function parseMaxLaunchHash(hash) {
-  const fragment = String(hash || '').replace(/^#/, '')
-  const params = new URLSearchParams(fragment)
+  const params = parseLaunchHashParams(hash)
   const hasDuplicates = MAX_LAUNCH_KEYS.some(key => params.getAll(key).length > 1)
 
   /** @param {string} key @returns {string|null} */
@@ -42,10 +46,8 @@ export function parseMaxLaunchHash(hash) {
 
 /** @returns {boolean} */
 export default function detectMaxLaunch() {
-  if (typeof window === 'undefined' || !window.location) {
-    return false
-  }
-
-  // SDK globals are not proof of host context: another script may have loaded it.
-  return parseMaxLaunchHash(window.location.hash).isMaxLaunch
+  // SDK globals are not proof of MAX host context: another script may have loaded it.
+  // MAX also restores parameters from the original navigation URL and
+  // per-key sessionStorage after a hash router replaces location.hash.
+  return parseMaxLaunchHash(getEffectiveMaxLaunchHash()).isMaxLaunch
 }

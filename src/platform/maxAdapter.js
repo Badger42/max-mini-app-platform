@@ -191,6 +191,8 @@ export default function createMaxAdapter(webApp, {
     backButton,
     enableClosingConfirmation() { return closingConfirmation.enable() },
     disableClosingConfirmation() { return closingConfirmation.disable() },
-    ready() {}
+    ready() {
+      if (typeof webApp.ready === 'function') return webApp.ready()
+    }
   }
 }

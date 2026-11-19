@@ -1,3 +1,8 @@
+import {
+  getEffectiveTelegramLaunchHash,
+  parseLaunchHashParams
+} from './launchParameterSources.js'
+
 const TELEGRAM_LAUNCH_KEYS = [
   'tgWebAppData',
   'tgWebAppPlatform',
@@ -11,8 +16,7 @@ const TELEGRAM_LAUNCH_KEYS = [
  * @returns {import('./platformTypes.js').TelegramLaunchParseResult}
  */
 export function parseTelegramLaunchHash(hash) {
-  const fragment = String(hash || '').replace(/^#/, '')
-  const params = new URLSearchParams(fragment)
+  const params = parseLaunchHashParams(hash)
   const hasDuplicates = TELEGRAM_LAUNCH_KEYS.some(key => params.getAll(key).length > 1)
 
   /** @param {string} key @returns {string|null} */
@@ -36,9 +40,7 @@ export function parseTelegramLaunchHash(hash) {
 /** @returns {boolean} */
 /** @returns {boolean} */
 export default function detectTelegramLaunch() {
-  if (typeof window === 'undefined' || !window.location) {
-    return false
-  }
   // Do not use window.Telegram as evidence of Telegram host context.
-  return parseTelegramLaunchHash(window.location.hash).isTelegramLaunch
+  // Telegram's SDK merges the persisted __telegram__initParams after routing.
+  return parseTelegramLaunchHash(getEffectiveTelegramLaunchHash()).isTelegramLaunch
 }

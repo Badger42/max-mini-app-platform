@@ -154,3 +154,81 @@ test('Telegram URL share uses the official share URL composer', async () => {
   assert.equal(url.searchParams.get('url'), 'https://example.com/page')
   assert.equal(url.searchParams.get('text'), 'hello')
 })
+
+
+test('Telegram parser supports Vue Router path-and-query hash fragments', () => {
+  const parsed = parseTelegramLaunchHash(
+    '#/orders/42?tgWebAppData=user%3Dexample&tgWebAppPlatform=ios&tgWebAppVersion=9.1'
+  )
+  assert.equal(parsed.isTelegramLaunch, true)
+  assert.equal(parsed.platform, 'ios')
+  assert.equal(parsed.version, '9.1')
+})
+
+test('launch context restores MAX parameters from sessionStorage after hash routing', async () => {
+  const storage = new Map([
+    ['WebAppData', 'saved-init-data'],
+    ['WebAppPlatform', 'android'],
+    ['WebAppVersion', '1.2']
+  ])
+  const restore = replaceGlobal('window', {
+    location: { hash: '#/orders/42', href: 'https://app.example/#/orders/42' },
+    sessionStorage: { getItem: key => storage.get(key) ?? null }
+  })
+
+  try {
+    const { default: detectLaunchContext } = await import('../src/platform/detectLaunchContext.js')
+    const context = detectLaunchContext()
+    assert.equal(context.type, 'max')
+    assert.deepEqual(context.launch, { platform: 'android', version: '1.2' })
+  } finally {
+    restore()
+  }
+})
+
+test('launch context restores MAX parameters from the original navigation URL', async () => {
+  const restore = replaceGlobal('window', {
+    location: { hash: '#/orders/42', href: 'https://app.example/#/orders/42' },
+    performance: {
+      getEntriesByType: type => type === 'navigation'
+        ? [{ name: 'https://app.example/#WebAppData=launch&WebAppPlatform=ios&WebAppVersion=1.3' }]
+        : []
+    },
+    sessionStorage: { getItem: () => null }
+  })
+
+  try {
+    const { default: detectLaunchContext } = await import('../src/platform/detectLaunchContext.js')
+    const context = detectLaunchContext()
+    assert.equal(context.type, 'max')
+    assert.deepEqual(context.launch, { platform: 'ios', version: '1.3' })
+  } finally {
+    restore()
+  }
+})
+
+test('launch context merges Telegram route hash with persisted initParams', async () => {
+  const stored = JSON.stringify({
+    tgWebAppData: 'user%3Dexample',
+    tgWebAppVersion: '9.1'
+  })
+  const restore = replaceGlobal('window', {
+    location: {
+      hash: '#/orders/42?tgWebAppPlatform=ios',
+      href: 'https://app.example/#/orders/42?tgWebAppPlatform=ios'
+    },
+    sessionStorage: {
+      getItem: key => key === '__telegram__initParams' ? stored : null
+    }
+  })
+
+  try {
+    const { default: detectLaunchContext } = await import('../src/platform/detectLaunchContext.js')
+    const context = detectLaunchContext()
+    assert.equal(context.type, 'telegram')
+    assert.deepEqual(context.launch, { platform: 'ios', version: '9.1' })
+    assert.equal(detectPlatform(), 'telegram')
+  } finally {
+    restore()
+  }
+})
